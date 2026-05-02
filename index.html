@@ -1,0 +1,3406 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Pantostan</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #e8dcc0;
+    color: #2a1f15;
+    font-family: 'Palatino', 'Book Antiqua', Georgia, serif;
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+  #app { position: fixed; inset: 0; display: flex; flex-direction: column; }
+
+#topbar {
+flex: 0 0 auto;
+height: 44px;
+background: #f0e2c0;
+border-bottom: 1.5px solid #2a1f15;
+display: flex;
+align-items: center;
+padding: 0 12px;
+gap: 10px;
+font-size: 13px;
+z-index: 5;
+}
+#topbar .turn { font-style: italic; }
+#topbar .info {
+margin-left: auto;
+font-family: monospace;
+font-size: 10px;
+letter-spacing: 0.15em;
+color: #5a4a35;
+text-transform: uppercase;
+}
+
+#worldArea {
+flex: 1 1 auto;
+position: relative;
+overflow: hidden;
+min-height: 0;
+/* paper / parchment background */
+background:
+radial-gradient(ellipse at 50% 50%, #f4e8c8 0%, #e0d0a0 60%, #c8b080 100%);
+}
+#worldSvg {
+display: block;
+width: 100%;
+height: 100%;
+cursor: grab;
+touch-action: none;
+-webkit-user-select: none;
+user-select: none;
+}
+#worldSvg.dragging { cursor: grabbing; }
+
+/* Inspector card slides up when clicking a person */
+#inspector {
+position: fixed;
+left: 50%;
+bottom: 16px;
+transform: translate(-50%, calc(100% + 32px));
+background: #f0e2c0;
+border: 2px solid #2a1f15;
+padding: 12px 16px;
+z-index: 50;
+transition: transform 0.25s ease;
+max-width: 90vw;
+width: 280px;
+box-shadow: 0 4px 12px rgba(40,30,15,0.3);
+}
+#inspector.open {
+transform: translate(-50%, 0);
+}
+#inspector h3 {
+font-style: italic;
+font-size: 18px;
+margin-bottom: 4px;
+}
+#inspector .meta {
+font-family: monospace;
+font-size: 9px;
+letter-spacing: 0.2em;
+color: #5a4a35;
+text-transform: uppercase;
+margin-bottom: 6px;
+}
+#inspector .desc {
+font-size: 13px;
+line-height: 1.4;
+color: #2a1f15;
+}
+#inspector .close {
+position: absolute;
+top: 4px; right: 6px;
+background: transparent;
+border: none;
+font-size: 22px;
+cursor: pointer;
+color: #2a1f15;
+width: 30px; height: 30px;
+line-height: 1;
+}
+
+.controls {
+position: absolute;
+bottom: 12px; right: 12px;
+display: flex;
+flex-direction: column;
+gap: 4px;
+z-index: 4;
+}
+.controls button {
+width: 36px; height: 36px;
+background: rgba(244,234,214,0.92);
+border: 1.5px solid #2a1f15;
+font-family: ‘Palatino’, serif;
+font-size: 18px;
+font-weight: 700;
+color: #2a1f15;
+cursor: pointer;
+-webkit-tap-highlight-color: transparent;
+}
+
+.compass {
+position: absolute;
+top: 12px; left: 12px;
+width: 50px; height: 50px;
+background: rgba(244,234,214,0.85);
+border: 1.5px solid #2a1f15;
+border-radius: 50%;
+pointer-events: none;
+z-index: 3;
+display: flex;
+align-items: center;
+justify-content: center;
+font-family: ‘Palatino’, serif;
+font-weight: 700;
+color: #2a1f15;
+font-size: 13px;
+}
+.compass::before {
+content: ‘N’;
+position: absolute;
+top: 4px;
+}
+.compass::after {
+content: ‘’;
+position: absolute;
+top: 50%; left: 50%;
+width: 4px; height: 24px;
+background: #2a1f15;
+transform: translate(-50%, -50%);
+clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.titlecard {
+position: fixed;
+top: 60px; left: 50%;
+transform: translateX(-50%);
+background: rgba(244,234,214,0.92);
+border: 1.5px solid #2a1f15;
+padding: 6px 16px;
+font-style: italic;
+font-size: 14px;
+z-index: 3;
+pointer-events: none;
+}
+
+/* Quiet American HUD */
+#hud {
+position: fixed;
+top: 60px; right: 8px;
+width: 200px;
+background: rgba(244,234,214,0.94);
+border: 1.5px solid #2a1f15;
+padding: 8px 10px;
+z-index: 4;
+font-family: ‘Palatino’, serif;
+font-size: 11px;
+box-shadow: 0 2px 8px rgba(40,30,15,0.25);
+}
+@media (max-width: 600px) {
+#hud {
+width: 165px;
+top: 54px;
+right: 6px;
+padding: 6px 8px;
+font-size: 10px;
+}
+.hud-buttons { gap: 2px; }
+.hud-btn { padding: 3px 4px; font-size: 9px; }
+.hud-feed { max-height: 80px; font-size: 8px; }
+.titlecard { display: none; }
+}
+.hud-header {
+display: flex;
+justify-content: space-between;
+align-items: center;
+border-bottom: 1px solid #2a1f15;
+padding-bottom: 4px;
+margin-bottom: 6px;
+font-family: monospace;
+font-size: 9px;
+letter-spacing: 0.15em;
+text-transform: uppercase;
+}
+.hud-title { font-weight: 700; }
+.hud-stat { font-family: monospace; }
+.hud-buttons {
+display: grid;
+grid-template-columns: 1fr 1fr;
+gap: 3px;
+margin-bottom: 6px;
+}
+.hud-btn {
+background: transparent;
+border: 1px solid #2a1f15;
+padding: 4px 6px;
+font-family: ‘Palatino’, serif;
+font-size: 10px;
+cursor: pointer;
+color: #2a1f15;
+-webkit-tap-highlight-color: transparent;
+}
+.hud-btn:hover { background: #f0e2c0; }
+.hud-btn:disabled { opacity: 0.35; }
+.hud-btn[data-eth=“purple”]:hover { background: #d8b8e0; }
+.hud-btn[data-eth=“violet”]:hover { background: #e8c0ee; }
+.hud-btn[data-eth=“indigo”]:hover { background: #b8c0e8; }
+.hud-btn[data-eth=“maroon”]:hover { background: #e8b8b8; }
+.hud-btn[data-eth=“yellow”]:hover { background: #f0e0a0; }
+.hud-feed {
+font-family: monospace;
+font-size: 9px;
+color: #5a4a35;
+max-height: 120px;
+overflow-y: auto;
+line-height: 1.4;
+border-top: 1px dashed #5a4a35;
+padding-top: 4px;
+}
+.hud-feed .red-event { color: #a83232; }
+.hud-feed .player-event { color: #2a4d7a; }
+.hud-feed .death-event { color: #5a1a1a; font-weight: 700; }
+.hud-feed .strike-event { color: #c84028; font-weight: 700; }
+
+.stability-bar {
+margin-bottom: 6px;
+}
+.stability-label {
+display: flex;
+justify-content: space-between;
+font-family: monospace;
+font-size: 8px;
+letter-spacing: 0.15em;
+color: #5a4a35;
+margin-bottom: 2px;
+text-transform: uppercase;
+}
+.stability-track {
+height: 8px;
+background: #d8c8a0;
+border: 1px solid #2a1f15;
+position: relative;
+overflow: hidden;
+}
+.stability-fill {
+position: absolute;
+left: 0; top: 0; bottom: 0;
+width: 100%;
+background: linear-gradient(90deg, #8a3a3a 0%, #c8a040 50%, #6a8a4a 100%);
+transition: width 0.4s ease;
+}
+
+#airstrikePanel {
+margin-top: 4px;
+margin-bottom: 6px;
+}
+.airstrike-btn {
+width: 100%;
+background: #1a1208;
+color: #e8c890;
+border: 1px solid #c84028;
+padding: 6px 6px;
+font-family: monospace;
+font-size: 10px;
+letter-spacing: 0.1em;
+text-transform: uppercase;
+cursor: pointer;
+-webkit-tap-highlight-color: transparent;
+transition: background 0.15s;
+}
+.airstrike-btn:hover { background: #2a1812; }
+.airstrike-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.airstrike-btn.armed {
+background: #6a1820;
+border-color: #f0c060;
+animation: pulse-strike 1.2s infinite;
+}
+@keyframes pulse-strike {
+0%, 100% { box-shadow: 0 0 0 0 rgba(240,192,96,0); }
+50% { box-shadow: 0 0 0 4px rgba(240,192,96,0.4); }
+}
+.airstrike-hint {
+font-family: monospace;
+font-size: 8px;
+color: #5a4a35;
+margin-top: 3px;
+line-height: 1.3;
+font-style: italic;
+}
+
+/* Endgame splash — typewritten declassified cable */
+#endgameSplash {
+position: fixed;
+inset: 0;
+background: radial-gradient(ellipse at center, #1a1208 0%, #050302 100%);
+color: #d8c890;
+z-index: 300;
+display: none;
+flex-direction: column;
+align-items: center;
+justify-content: flex-start;
+padding: 32px 24px;
+text-align: center;
+overflow-y: auto;
+font-family: ‘Courier New’, monospace;
+}
+#endgameSplash::before {
+/* Faint grid of paper / typewriter dust */
+content: ‘’;
+position: absolute;
+inset: 0;
+background-image:
+repeating-linear-gradient(0deg, rgba(216,200,144,0.03) 0px, rgba(216,200,144,0.03) 1px, transparent 1px, transparent 3px);
+pointer-events: none;
+}
+.cable-stamp {
+font-size: 11px;
+letter-spacing: 0.3em;
+color: #c84028;
+border: 2px solid #c84028;
+padding: 4px 12px;
+margin-bottom: 28px;
+transform: rotate(-2deg);
+align-self: center;
+}
+#endgameSplash h1 {
+font-family: ‘Courier New’, monospace;
+font-size: 28px;
+font-weight: 700;
+letter-spacing: 0.15em;
+margin-bottom: 6px;
+color: #f0e2c0;
+text-transform: uppercase;
+}
+.cable-subhead {
+font-size: 12px;
+letter-spacing: 0.25em;
+text-transform: uppercase;
+color: #b8a878;
+margin-bottom: 28px;
+}
+.cable-body {
+max-width: 520px;
+font-size: 13px;
+line-height: 1.7;
+color: #d8c890;
+margin-bottom: 24px;
+text-align: left;
+white-space: pre-wrap;
+}
+.cable-metrics {
+max-width: 520px;
+width: 100%;
+margin-bottom: 32px;
+border-top: 1px dashed #5a4a35;
+border-bottom: 1px dashed #5a4a35;
+padding: 14px 0;
+}
+.cable-metrics .metric-row {
+display: flex;
+justify-content: space-between;
+font-size: 12px;
+padding: 3px 0;
+color: #d8c890;
+letter-spacing: 0.05em;
+}
+.cable-metrics .metric-row .label { color: #8a7858; }
+.cable-metrics .metric-row .value { color: #f0e2c0; font-weight: 700; }
+.cable-tacitus {
+max-width: 540px;
+font-size: 14px;
+font-style: italic;
+color: #b8a878;
+line-height: 1.7;
+margin-bottom: 32px;
+padding: 0 12px;
+}
+.cable-attribution {
+display: inline-block;
+margin-top: 8px;
+font-size: 11px;
+letter-spacing: 0.1em;
+color: #8a7858;
+font-style: normal;
+}
+#endgameSplash button {
+margin-top: 12px;
+background: transparent;
+color: #d8c890;
+border: 1px solid #d8c890;
+padding: 10px 24px;
+font-family: ‘Courier New’, monospace;
+font-size: 11px;
+text-transform: uppercase;
+letter-spacing: 0.2em;
+cursor: pointer;
+}
+#endgameSplash button:hover { background: rgba(216,200,144,0.1); }
+</style>
+
+</head>
+<body>
+
+<div id="app">
+  <div id="topbar">
+    <span class="turn">East Pantostan</span>
+    <span class="info" id="hint">DRAG TO PAN · TAP A PERSON</span>
+  </div>
+  <div id="worldArea">
+    <svg id="worldSvg" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <!-- A "rough" filter that gives lines a hand-drawn quiver -->
+        <filter id="rough" x="-2%" y="-2%" width="104%" height="104%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" seed="3" result="t"/>
+          <feDisplacementMap in="SourceGraphic" in2="t" scale="1.8"/>
+        </filter>
+        <filter id="watercolor" x="-2%" y="-2%" width="104%" height="104%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="5" result="noise"/>
+          <feColorMatrix in="noise" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.10 0" result="darkNoise"/>
+          <feComposite in="darkNoise" in2="SourceGraphic" operator="in" result="textured"/>
+          <feMerge>
+            <feMergeNode in="SourceGraphic"/>
+            <feMergeNode in="textured"/>
+          </feMerge>
+        </filter>
+        <!-- Soft drop shadow -->
+        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="1.2"/>
+          <feOffset dx="0.6" dy="1.2"/>
+          <feComponentTransfer><feFuncA type="linear" slope="0.4"/></feComponentTransfer>
+          <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+```
+  <!-- World group: this is what gets translated when panning -->
+  <g id="worldGroup">
+    <g id="terrainLayer"></g>
+    <g id="riverLayer"></g>
+    <g id="ethnicZoneLayer" pointer-events="none"></g>
+    <g id="forestLayer"></g>
+    <g id="buildingLayer"></g>
+    <g id="peopleLayer"></g>
+  </g>
+</svg>
+<div class="compass"></div>
+<div class="titlecard">East Pantostan</div>
+<div class="controls">
+  <button onclick="zoomBy(1.2)">+</button>
+  <button onclick="zoomBy(0.85)">−</button>
+  <button onclick="resetView()" style="font-size:10px;">⌂</button>
+</div>
+```
+
+  </div>
+</div>
+
+<div id="inspector">
+  <button class="close" onclick="closeInspector()">×</button>
+  <h3 id="inspName">—</h3>
+  <div class="meta" id="inspMeta">—</div>
+  <div class="desc" id="inspDesc">—</div>
+</div>
+
+<div id="hud">
+  <div class="hud-header">
+    <span class="hud-title">QUIET AMERICAN</span>
+    <span class="hud-stat" id="hudMoney">$100</span>
+    <span class="hud-stat" id="hudDeaths">☠ 0</span>
+  </div>
+  <div class="stability-bar">
+    <div class="stability-label">REGIONAL STABILITY <span id="hudStabilityValue">100</span></div>
+    <div class="stability-track"><div class="stability-fill" id="hudStabilityFill"></div></div>
+  </div>
+  <div class="hud-buttons">
+    <button class="hud-btn" data-eth="purple" onclick="shipGuns('purple')">⌖ Purple</button>
+    <button class="hud-btn" data-eth="violet" onclick="shipGuns('violet')">⌖ Violet</button>
+    <button class="hud-btn" data-eth="indigo" onclick="shipGuns('indigo')">⌖ Indigo</button>
+    <button class="hud-btn" data-eth="maroon" onclick="shipGuns('maroon')">⌖ Maroon</button>
+    <button class="hud-btn" data-eth="yellow" onclick="shipGuns('yellow')">⌖ Yellow</button>
+  </div>
+  <div id="airstrikePanel"></div>
+  <div class="hud-feed" id="hudFeed"></div>
+</div>
+
+<div id="endgameSplash">
+  <div class="cable-stamp">DECLASSIFIED · POST-CONFLICT REPORT · EYES ONLY</div>
+  <h1 id="endgameTitle">MISSION ACCOMPLISHED</h1>
+  <div class="cable-subhead" id="endgameSubhead">REGIONAL STABILITY ACHIEVED</div>
+  <div class="cable-body" id="endgameBody"></div>
+  <div class="cable-metrics" id="endgameMetrics"></div>
+  <div class="cable-tacitus">
+    "To ravage, to slaughter, to usurp under false titles, they call empire;<br>
+     and where they make a desert, they call it peace."<br>
+    <span class="cable-attribution">— Tacitus, <em>Agricola</em>, c. 98 AD</span>
+  </div>
+  <button onclick="location.reload()">A NEW FILE</button>
+</div>
+
+<script>
+'use strict';
+
+// ============================================================
+// WORLD CONFIGURATION
+// ============================================================
+const WORLD_W = 40;   // tiles wide
+const WORLD_H = 30;   // tiles tall
+const TILE_W = 64;    // diamond width in pixels
+const TILE_H = 32;    // diamond height in pixels
+
+// Terrain types
+const T = {
+  GRASS: 0,
+  FIELD: 1,    // farmland (tilled rows)
+  WATER: 2,
+  PATH:  3,
+  STONE: 4,
+};
+
+// Color palette — soft watercolor
+const COLOR = {
+  grass:   ['#aac786', '#8eb069', '#7ea25a'],
+  grassHi: '#b8d098',
+  grassLo: '#6e8e4c',
+  field:   ['#d8b870', '#c9a558', '#b89344'],
+  fieldHi: '#e8c880',
+  water:   ['#7aa4c0', '#6892b0', '#5a82a0'],
+  waterHi: '#9cc0d8',
+  path:    ['#c8a880', '#b69570'],
+  forest:  ['#5a7a3a', '#4a6a2c', '#3a5a20'],
+  ink:     '#2a1f15',
+  inkSoft: '#4a3825',
+};
+
+// Coordinate conversion: tile (tx, ty) -> screen (sx, sy) for isometric
+function tileToScreen(tx, ty) {
+  return {
+    sx: (tx - ty) * (TILE_W / 2),
+    sy: (tx + ty) * (TILE_H / 2),
+  };
+}
+
+// Compute the bounds of all tiles in screen space
+function worldBounds() {
+  const minX = -WORLD_H * TILE_W / 2;
+  const maxX = WORLD_W * TILE_W / 2;
+  const minY = 0;
+  const maxY = (WORLD_W + WORLD_H) * TILE_H / 2;
+  return { minX, maxX, minY, maxY, w: maxX - minX, h: maxY - minY };
+}
+
+// ============================================================
+// WORLD STATE
+// ============================================================
+const W = {
+  tiles: [],     // 2D array: W.tiles[y][x] = T.GRASS etc.
+  features: [],  // {type, tx, ty, ...} for villages/cities/forests
+  people: [],    // {id, name, role, home, x, y, vx, vy, target, color, place}
+  pois: {},      // map: settlementName -> array of { type, tx, ty, label }
+  selectedPerson: null,
+};
+
+// ============================================================
+// ETHNIC GROUPS
+// Five groups based on the old faction colors. Each has its own
+// names, clothing palette, and characteristic visual markers.
+// ============================================================
+const ETHNICITIES = ['purple', 'violet', 'indigo', 'maroon', 'yellow'];
+
+const ETHNIC_NAMES = {
+  purple: {
+    first: ['Tessa','Velka','Mirin','Joriel','Karelle','Anya','Lirel','Olya','Brek','Ostrim','Sorra','Pell'],
+    last:  ['Cassora','Velsen','Hartmel','Drovann','of the Vale','of the Hills','the Elder','the Younger'],
+  },
+  violet: {
+    first: ['Liorah','Yenna','Sira','Halen','Cael','Toska','Senn','Marrow','Bevin','Dorra','Vask','Threnn'],
+    last:  ['Lirask','Pellish','Nuvenor','of the Lake','of the West','Threnn','Korva'],
+  },
+  indigo: {
+    first: ['Davros','Brom','Ovrin','Vask','Maer','Korva','Ostrim','Threnn','Davhal','Pell','Ennis'],
+    last:  ['Threnholt','Ovar','Kessar','of the Sea','of Threnholt','the Elder','of the Coast'],
+  },
+  maroon: {
+    first: ['Davhal','Brek','Sira','Joriel','Olya','Marrow','Halen','Pell','Toska','Cael'],
+    last:  ['Davhal','Briska','Shorvel','of the South','of the River','of the Gulf','the Younger'],
+  },
+  yellow: {
+    first: ['Mirin','Lirel','Anya','Bevin','Korva','Dorra','Senn','Vask','Joriel','Tessa'],
+    last:  ['Mervin','Ankesh','Theldon','of the Road','of the Marsh','of Ankesh','the Wanderer'],
+  },
+};
+
+// Ethnic clothing palettes — characteristic shirt colors for adults.
+// Children get brighter variants. These layer on top of role-based variation.
+const ETHNIC_PALETTE = {
+  purple: {
+    shirt: ['#8a5aa8','#a878c0','#7a4a98','#9c68b0','#b88ac8'],
+    accent: '#6a3a88',  // headscarf / shawl trim
+    hair: ['#3a2818','#2a1810','#5a3a20'],
+    skin: '#e8c098',
+  },
+  violet: {
+    shirt: ['#c878d8','#b86ac8','#d088e0','#a85ac0','#e89cee'],
+    accent: '#9a3aaa',
+    hair: ['#3a2818','#2a1810','#4a2a18'],
+    skin: '#e8c098',
+  },
+  indigo: {
+    shirt: ['#3a4a8c','#2a3a78','#4a5a98','#3a4ea0','#2a3a6a'],
+    accent: '#1a2858',
+    hair: ['#1a1208','#2a1810','#1a0e08'],
+    skin: '#c89878',
+  },
+  maroon: {
+    shirt: ['#8a3a3a','#a04848','#7a2a2a','#6a3838','#a05050'],
+    accent: '#4a1818',
+    hair: ['#1a1208','#2a1810','#3a2418'],
+    skin: '#b88868',
+  },
+  yellow: {
+    shirt: ['#c8a838','#d8b848','#a88828','#b89838','#c8b048'],
+    accent: '#8a6818',
+    hair: ['#3a2818','#5a3a20','#7a5028','#a87838'],
+    skin: '#d8a878',
+  },
+};
+
+// Ethnic composition of each settlement (must sum to 1.0).
+// "Heartland" settlements are 70-85% one group; mixed towns spread.
+const ETHNIC_COMPOSITION = {
+  Cassora:   { purple: 0.75, violet: 0.10, yellow: 0.08, indigo: 0.04, maroon: 0.03 },
+  Velsen:    { purple: 0.65, violet: 0.22, yellow: 0.08, maroon: 0.03, indigo: 0.02 },
+  Threnholt: { indigo: 0.72, yellow: 0.12, purple: 0.08, maroon: 0.04, violet: 0.04 },
+  Davhal:    { maroon: 0.55, yellow: 0.18, violet: 0.12, purple: 0.08, indigo: 0.07 },
+  Pellish:   { violet: 0.78, purple: 0.12, yellow: 0.06, maroon: 0.02, indigo: 0.02 },
+  Mervin:    { yellow: 0.50, violet: 0.25, maroon: 0.12, purple: 0.08, indigo: 0.05 },
+  Ankesh:    { yellow: 0.32, purple: 0.20, maroon: 0.18, violet: 0.16, indigo: 0.14 },
+  Briska:    { maroon: 0.68, yellow: 0.18, violet: 0.08, purple: 0.04, indigo: 0.02 },
+  Shorvel:   { maroon: 0.78, yellow: 0.10, indigo: 0.06, purple: 0.04, violet: 0.02 },
+  Ovar:      { indigo: 0.68, yellow: 0.18, maroon: 0.06, purple: 0.05, violet: 0.03 },
+};
+
+function pickEthnicity(placeName) {
+  const comp = ETHNIC_COMPOSITION[placeName];
+  if (!comp) return 'yellow';
+  const r = Math.random();
+  let cumulative = 0;
+  for (const [eth, p] of Object.entries(comp)) {
+    cumulative += p;
+    if (r <= cumulative) return eth;
+  }
+  return Object.keys(comp)[0];
+}
+
+function pickName(ethnicity) {
+  const pool = ETHNIC_NAMES[ethnicity] || ETHNIC_NAMES.yellow;
+  const f = pool.first[Math.floor(Math.random()*pool.first.length)];
+  const l = pool.last[Math.floor(Math.random()*pool.last.length)];
+  return f + ' ' + l;
+}
+
+const ROLES = {
+  farmer:  { label: 'Farmer',         desc: 'Works the fields outside the village. Their season runs from spring through harvest.' },
+  miller:  { label: 'Miller',         desc: 'Grinds wheat into flour at the mill by the river.' },
+  smith:   { label: 'Smith',          desc: 'Hammers iron at a forge. Knows everyone\'s knives by their handles.' },
+  merchant:{ label: 'Merchant',       desc: 'Carries goods between villages and the cities. Talks to anyone who will buy.' },
+  worker:  { label: 'Factory worker', desc: 'Spends twelve-hour shifts in the city. The chimneys never stop.' },
+  child:   { label: 'Child',          desc: 'Plays in the lanes. Knows the shortcuts.' },
+  priest:  { label: 'Priest',         desc: 'Tends the small chapel. Offers blessings; collects rumors.' },
+  soldier: { label: 'Soldier',        desc: 'Wears a uniform. Patrols the edges of town.' },
+  fisher:  { label: 'Fisher',         desc: 'Mends nets by the river. Out before dawn.' },
+  teacher: { label: 'Teacher',        desc: 'Walks to the schoolhouse. Knows the children\'s family histories.' },
+};
+
+const ETHNIC_LABELS = {
+  purple: 'Purple',
+  violet: 'Violet',
+  indigo: 'Indigo',
+  maroon: 'Maroon',
+  yellow: 'Yellow',
+};
+
+// ============================================================
+// WORLD GENERATION
+// ============================================================
+function generateWorld() {
+  // Initialize all tiles to grass
+  W.tiles = [];
+  for (let y = 0; y < WORLD_H; y++) {
+    const row = [];
+    for (let x = 0; x < WORLD_W; x++) {
+      row.push(T.GRASS);
+    }
+    W.tiles.push(row);
+  }
+
+  // 1. Carve a river — winds diagonally across the map
+  carveRiver();
+
+  // 2. Designate three city locations + several villages
+  const cities = [
+    { name: 'Cassora',   tx: 8,  ty: 6,  factories: 2 },
+    { name: 'Threnholt', tx: 30, ty: 10, factories: 3 },
+    { name: 'Davhal',    tx: 14, ty: 22, factories: 2 },
+  ];
+  const villages = [
+    { name: 'Velsen',  tx: 18, ty: 5  },
+    { name: 'Pellish', tx: 4,  ty: 14 },
+    { name: 'Mervin',  tx: 20, ty: 16 },
+    { name: 'Ankesh',  tx: 24, ty: 19 },
+    { name: 'Briska',  tx: 6,  ty: 22 },
+    { name: 'Shorvel', tx: 28, ty: 24 },
+    { name: 'Ovar',    tx: 34, ty: 16 },
+  ];
+
+  // 3. Place fields around villages and cities
+  for (const v of [...cities, ...villages]) {
+    placeFieldsAround(v.tx, v.ty, v.factories ? 4 : 3);
+  }
+
+  // 4. Carve paths between settlements
+  const allPlaces = [...cities, ...villages];
+  for (let i = 0; i < allPlaces.length; i++) {
+    // Connect each place to its nearest 1-2 neighbors
+    const dists = allPlaces
+      .map((o, j) => ({ j, d: Math.hypot(o.tx-allPlaces[i].tx, o.ty-allPlaces[i].ty) }))
+      .filter(o => o.j !== i)
+      .sort((a, b) => a.d - b.d);
+    carvePath(allPlaces[i], allPlaces[dists[0].j]);
+    if (dists[1] && dists[1].d < 18) {
+      carvePath(allPlaces[i], allPlaces[dists[1].j]);
+    }
+  }
+
+  // 5. Forests — patches in unsettled areas
+  const forestPatches = [
+    { tx: 2, ty: 3, r: 3 },
+    { tx: 14, ty: 12, r: 2 },
+    { tx: 26, ty: 6, r: 3 },
+    { tx: 2, ty: 26, r: 2 },
+    { tx: 36, ty: 23, r: 2 },
+    { tx: 22, ty: 28, r: 2 },
+    { tx: 32, ty: 2, r: 2 },
+  ];
+  for (const f of forestPatches) {
+    for (let dy = -f.r; dy <= f.r; dy++) {
+      for (let dx = -f.r; dx <= f.r; dx++) {
+        const d = Math.hypot(dx, dy);
+        if (d > f.r) continue;
+        const x = f.tx + dx, y = f.ty + dy;
+        if (!inBounds(x, y)) continue;
+        if (W.tiles[y][x] !== T.GRASS) continue;
+        if (Math.random() < 0.7) {
+          W.features.push({ type: 'tree', tx: x + (Math.random()-0.5)*0.6, ty: y + (Math.random()-0.5)*0.6 });
+        }
+      }
+    }
+  }
+
+  // 6. Add scattered individual trees around the map
+  for (let i = 0; i < 40; i++) {
+    const tx = Math.floor(Math.random() * WORLD_W);
+    const ty = Math.floor(Math.random() * WORLD_H);
+    if (W.tiles[ty][tx] === T.GRASS) {
+      W.features.push({ type: 'tree', tx: tx + Math.random()*0.6, ty: ty + Math.random()*0.6 });
+    }
+  }
+
+  // 7. Place city and village buildings
+  for (const c of cities) {
+    W.features.push({ type: 'city', tx: c.tx, ty: c.ty, name: c.name, factories: c.factories });
+    GAME.settlements.push({
+      name: c.name,
+      tx: c.tx, ty: c.ty,
+      isCity: true,
+      radius: 4.5,
+      dominant: null,
+      composition: {},
+      pulseUntil: 0,
+      destroyed: false,
+      // Trauma: recent violence against each ethnic group in this place.
+      // Goes up when a member of that ethnicity is killed here.
+      // Decays slowly over time. Drives ethnic flight.
+      trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
+    });
+  }
+  for (const v of villages) {
+    W.features.push({ type: 'village', tx: v.tx, ty: v.ty, name: v.name });
+    GAME.settlements.push({
+      name: v.name,
+      tx: v.tx, ty: v.ty,
+      isCity: false,
+      radius: 3.0,
+      dominant: null,
+      composition: {},
+      pulseUntil: 0,
+      destroyed: false,
+      trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
+    });
+  }
+
+  // 7b. Generate Points of Interest for each settlement.
+  // POIs are named locations within a settlement that people walk to.
+  // Each settlement gets: houses (one per couple of people), market, chapel,
+  // and field-edge spots. Cities also get factory entrances.
+  for (const c of cities) generatePOIsForCity(c);
+  for (const v of villages) generatePOIsForVillage(v);
+
+  // 7c. Find riverbank tiles near each settlement (for fishers & water-fetchers)
+  computeRiverbankPOIs();
+
+  // 8. Generate people for each settlement
+  for (const c of cities) generatePeople(c, true);
+  for (const v of villages) generatePeople(v, false);
+}
+
+function inBounds(x, y) {
+  return x >= 0 && x < WORLD_W && y >= 0 && y < WORLD_H;
+}
+
+function carveRiver() {
+  // River starts top-left area, ends bottom-right-ish
+  let x = 2, y = 2;
+  while (x < WORLD_W && y < WORLD_H) {
+    if (inBounds(x, y)) W.tiles[y][x] = T.WATER;
+    if (inBounds(x, y+1) && Math.random() < 0.3) W.tiles[y+1][x] = T.WATER;
+    if (inBounds(x+1, y) && Math.random() < 0.3) W.tiles[y][x+1] = T.WATER;
+    // bias toward bottom-right with wobble
+    if (Math.random() < 0.6) x += 1;
+    else if (Math.random() < 0.6) y += 1;
+    else { x += 1; y += 1; }
+  }
+  // Smooth: thicken river slightly
+  const original = W.tiles.map(row => [...row]);
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      if (original[y][x] === T.WATER) {
+        if (inBounds(x+1, y) && Math.random() < 0.4) W.tiles[y][x+1] = T.WATER;
+        if (inBounds(x, y+1) && Math.random() < 0.4) W.tiles[y+1][x] = T.WATER;
+      }
+    }
+  }
+}
+
+function placeFieldsAround(cx, cy, radius) {
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const d = Math.abs(dx) + Math.abs(dy);
+      if (d === 0 || d > radius) continue;
+      const x = cx + dx, y = cy + dy;
+      if (!inBounds(x, y)) continue;
+      if (W.tiles[y][x] === T.GRASS && Math.random() < 0.55) {
+        W.tiles[y][x] = T.FIELD;
+      }
+    }
+  }
+}
+
+function carvePath(a, b) {
+  // Simple line carving
+  let x = a.tx, y = a.ty;
+  while (x !== b.tx || y !== b.ty) {
+    if (inBounds(x, y) && W.tiles[y][x] !== T.WATER) {
+      if (W.tiles[y][x] === T.GRASS || W.tiles[y][x] === T.FIELD) {
+        if (Math.random() < 0.7) W.tiles[y][x] = T.PATH;
+      }
+    }
+    if (Math.abs(b.tx - x) > Math.abs(b.ty - y)) {
+      x += Math.sign(b.tx - x);
+    } else {
+      y += Math.sign(b.ty - y);
+    }
+  }
+}
+
+// ============================================================
+// POINTS OF INTEREST (POIs)
+// Each settlement has named locations people walk to:
+//   - house: where someone sleeps / dwells
+//   - market: village center plaza
+//   - chapel: small social hub
+//   - field: a spot at the edge of the farmland
+//   - riverbank: nearest river tile to the settlement
+//   - factory: factory entrance (cities only)
+//   - workshop: smith / miller spot
+//   - schoolhouse: where teachers and children go
+// ============================================================
+function generatePOIsForVillage(v) {
+  const list = [];
+  // Center / market square
+  list.push({ kind: 'market',     tx: v.tx,        ty: v.ty,         label: 'the market' });
+  // Chapel just off-center
+  list.push({ kind: 'chapel',     tx: v.tx + 0.7,  ty: v.ty - 0.9,   label: 'the chapel' });
+  // Workshop (smith / miller)
+  list.push({ kind: 'workshop',   tx: v.tx - 0.9,  ty: v.ty + 0.4,   label: 'the workshop' });
+  // 4 houses arranged around the center
+  const houseAngles = [0.3, 1.6, 3.0, 4.7];
+  houseAngles.forEach((a, i) => {
+    list.push({
+      kind: 'house',
+      tx: v.tx + Math.cos(a) * 0.7,
+      ty: v.ty + Math.sin(a) * 0.7,
+      label: 'home',
+      houseIdx: i,
+    });
+  });
+  // 4 field spots — at the edges of the farmland zone
+  const fieldOffsets = [[2.2, 0.2],[ -2.2, 0.5],[0.4, 2.2],[0.0, -2.0]];
+  fieldOffsets.forEach(([dx, dy], i) => {
+    if (W.tiles[Math.floor(v.ty+dy)] && W.tiles[Math.floor(v.ty+dy)][Math.floor(v.tx+dx)] === T.FIELD) {
+      list.push({ kind: 'field', tx: v.tx + dx, ty: v.ty + dy, label: 'the fields' });
+    } else {
+      // fall back to nearest field tile
+      const f = nearestTileOfType(v.tx + dx, v.ty + dy, T.FIELD, 5);
+      if (f) list.push({ kind: 'field', tx: f.x + 0.3, ty: f.y + 0.3, label: 'the fields' });
+    }
+  });
+  W.pois[v.name] = list;
+}
+
+function generatePOIsForCity(c) {
+  const list = [];
+  // Market square (city center)
+  list.push({ kind: 'market',  tx: c.tx,        ty: c.ty,         label: 'the market square' });
+  // Chapel
+  list.push({ kind: 'chapel',  tx: c.tx + 1.0,  ty: c.ty - 1.4,   label: 'the chapel' });
+  // Schoolhouse
+  list.push({ kind: 'school',  tx: c.tx - 1.2,  ty: c.ty - 1.0,   label: 'the schoolhouse' });
+  // Workshop / forge
+  list.push({ kind: 'workshop',tx: c.tx - 1.4,  ty: c.ty + 0.3,   label: 'the forge' });
+  // Houses (more in cities)
+  const housePositions = [
+    [-1.2, -1.2], [0.0, -1.4], [1.2, -1.0],
+    [-1.4, 0.0],  [1.4, 0.2],
+    [-0.8, 1.1],  [0.8, 1.2],
+  ];
+  housePositions.forEach((pos, i) => {
+    list.push({ kind: 'house', tx: c.tx + pos[0], ty: c.ty + pos[1], label: 'home', houseIdx: i });
+  });
+  // Factory entrances
+  const factoryPositions = [[-1.8, 1.6],[1.8, -1.6],[-1.8, -1.6]].slice(0, c.factories || 2);
+  factoryPositions.forEach((pos, i) => {
+    list.push({ kind: 'factory', tx: c.tx + pos[0], ty: c.ty + pos[1] + 0.4, label: 'the factory', factoryIdx: i });
+  });
+  // Field edges
+  const fieldOffsets = [[2.6, 0.4],[-2.4, 0.5],[0.5, 2.4],[0.2, -2.4]];
+  fieldOffsets.forEach((off, i) => {
+    const fx = Math.floor(c.tx + off[0]);
+    const fy = Math.floor(c.ty + off[1]);
+    if (W.tiles[fy] && W.tiles[fy][fx] === T.FIELD) {
+      list.push({ kind: 'field', tx: c.tx + off[0], ty: c.ty + off[1], label: 'the fields' });
+    } else {
+      const f = nearestTileOfType(c.tx + off[0], c.ty + off[1], T.FIELD, 5);
+      if (f) list.push({ kind: 'field', tx: f.x + 0.3, ty: f.y + 0.3, label: 'the fields' });
+    }
+  });
+  W.pois[c.name] = list;
+}
+
+function nearestTileOfType(tx, ty, type, maxR) {
+  for (let r = 0; r <= maxR; r++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+        const x = Math.floor(tx) + dx;
+        const y = Math.floor(ty) + dy;
+        if (inBounds(x, y) && W.tiles[y][x] === type) return { x, y };
+      }
+    }
+  }
+  return null;
+}
+
+function computeRiverbankPOIs() {
+  // For each settlement, find the nearest WATER tile and add a riverbank POI
+  // adjacent to it (on a non-water tile beside the water).
+  const settlements = [...W.features.filter(f => f.type === 'village' || f.type === 'city')];
+  for (const s of settlements) {
+    const water = nearestTileOfType(s.tx, s.ty, T.WATER, 12);
+    if (!water) continue;
+    // Find a non-water tile adjacent to that water tile (the bank)
+    const candidates = [
+      [water.x - 1, water.y], [water.x + 1, water.y],
+      [water.x, water.y - 1], [water.x, water.y + 1],
+    ];
+    for (const [bx, by] of candidates) {
+      if (inBounds(bx, by) && W.tiles[by][bx] !== T.WATER) {
+        const list = W.pois[s.name] || [];
+        list.push({ kind: 'riverbank', tx: bx + 0.5, ty: by + 0.5, label: 'the riverbank' });
+        W.pois[s.name] = list;
+        break;
+      }
+    }
+  }
+}
+
+// ============================================================
+// PEOPLE GENERATION & SCHEDULING
+// Each person gets a "schedule" — a weighted list of POI kinds
+// they cycle through, plus a dwell time at each.
+// ============================================================
+const ROLE_SCHEDULES = {
+  // For each role, list of {kind, dwell:[min,max], weight}
+  // The agent picks weighted-randomly; weights bias the long-run distribution.
+  farmer:  [
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'field',     dwell: [600, 1400], weight: 4 },
+    { kind: 'market',    dwell: [200, 500],  weight: 1 },
+  ],
+  miller:  [
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'workshop',  dwell: [800, 1600], weight: 4 },
+    { kind: 'market',    dwell: [200, 400],  weight: 1 },
+  ],
+  smith:   [
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'workshop',  dwell: [900, 1800], weight: 4 },
+    { kind: 'market',    dwell: [200, 400],  weight: 1 },
+  ],
+  merchant:[
+    { kind: 'market',    dwell: [600, 1200], weight: 4 },
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'workshop',  dwell: [200, 400],  weight: 1 },
+    { kind: 'chapel',    dwell: [200, 400],  weight: 1 },
+  ],
+  worker:  [
+    { kind: 'house',     dwell: [400, 800],  weight: 2 },
+    { kind: 'factory',   dwell: [1200, 2200],weight: 5 },
+    { kind: 'market',    dwell: [150, 350],  weight: 1 },
+  ],
+  child:   [
+    { kind: 'house',     dwell: [200, 400],  weight: 1 },
+    { kind: 'school',    dwell: [600, 1200], weight: 2 },
+    { kind: 'market',    dwell: [200, 500],  weight: 2 },
+    { kind: 'riverbank', dwell: [300, 700],  weight: 2 },
+    { kind: 'field',     dwell: [200, 500],  weight: 1 },
+  ],
+  priest:  [
+    { kind: 'chapel',    dwell: [800, 1600], weight: 4 },
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'market',    dwell: [300, 600],  weight: 1 },
+  ],
+  soldier: [
+    { kind: 'market',    dwell: [400, 800],  weight: 2 },
+    { kind: 'house',     dwell: [300, 600],  weight: 1 },
+    { kind: 'field',     dwell: [400, 800],  weight: 1 },
+    { kind: 'factory',   dwell: [400, 800],  weight: 1 },
+  ],
+  fisher:  [
+    { kind: 'riverbank', dwell: [1000, 1800],weight: 5 },
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'market',    dwell: [200, 400],  weight: 1 },
+  ],
+  teacher: [
+    { kind: 'school',    dwell: [800, 1600], weight: 3 },
+    { kind: 'house',     dwell: [400, 800],  weight: 1 },
+    { kind: 'chapel',    dwell: [300, 600],  weight: 1 },
+  ],
+};
+
+function generatePeople(place, isCity) {
+  const count = isCity ? 14 : 7;
+  const roleSet = isCity
+    ? ['worker','worker','worker','merchant','smith','child','priest','teacher','soldier','farmer','farmer']
+    : ['farmer','farmer','farmer','miller','child','smith','fisher','priest','merchant'];
+
+  const pois = W.pois[place.name] || [];
+  const houses = pois.filter(p => p.kind === 'house');
+
+  for (let i = 0; i < count; i++) {
+    const role = roleSet[Math.floor(Math.random()*roleSet.length)];
+    const ethnicity = pickEthnicity(place.name);
+    const homePoi = houses[i % houses.length] || pois[0] || { tx: place.tx, ty: place.ty };
+    const tx = homePoi.tx + (Math.random()-0.5)*0.3;
+    const ty = homePoi.ty + (Math.random()-0.5)*0.3;
+    const screen = tileToScreen(tx, ty);
+    const palette = ETHNIC_PALETTE[ethnicity];
+    W.people.push({
+      id: 'person_' + W.people.length,
+      name: pickName(ethnicity),
+      role,
+      ethnicity,
+      place: place.name,
+      x: screen.sx,
+      y: screen.sy,
+      tx, ty,
+      home: homePoi,
+      state: 'idle',
+      currentPoi: homePoi,
+      dwellTimer: Math.random() * 600,
+      path: [],
+      pathIdx: 0,
+      facing: 0,
+      seed: Math.random(),
+      shirt: pickShirtForPerson(role, ethnicity),
+      accent: palette.accent,
+      hair: palette.hair[Math.floor(Math.random()*palette.hair.length)],
+      skin: palette.skin,
+      // ============ TRAITS (hidden, 0-1) ============
+      ...generateTraits(role, ethnicity),
+      // ============ STATE ============
+      alive: true,
+      armed: false,
+      // Encounter cooldown so two people don't keep arguing every frame
+      encounterCooldown: 0,
+      // Visible "speech bubble" — sets a label and timer when triggered
+      bubble: null,        // {symbol, expires}
+      // If they've been in a recent fight, briefly stunned
+      stunnedUntil: 0,
+    });
+  }
+}
+
+// ============================================================
+// TRAITS — four hidden values per person, biased by role + ethnicity
+// politicalPassion   — how strongly they hold opinions about power
+// violenceProclivity — willingness to escalate
+// ethnicPassion      — strength of in-group / out-group feeling
+// economicInterest   — how much they prioritize money over ideology
+// ============================================================
+function generateTraits(role, ethnicity) {
+  // Start with role-based biases, then add randomness
+  const bias = roleBias(role);
+  return {
+    politicalPassion:   clamp01(bias.pol + (Math.random() - 0.5) * 0.5),
+    violenceProclivity: clamp01(bias.vio + (Math.random() - 0.5) * 0.5),
+    ethnicPassion:      clamp01(bias.eth + (Math.random() - 0.5) * 0.5),
+    economicInterest:   clamp01(bias.eco + (Math.random() - 0.5) * 0.5),
+  };
+}
+
+function roleBias(role) {
+  switch (role) {
+    case 'soldier':  return { pol: 0.5, vio: 0.7, eth: 0.5, eco: 0.4 };
+    case 'priest':   return { pol: 0.6, vio: 0.2, eth: 0.6, eco: 0.2 };
+    case 'merchant': return { pol: 0.3, vio: 0.2, eth: 0.3, eco: 0.8 };
+    case 'worker':   return { pol: 0.5, vio: 0.4, eth: 0.5, eco: 0.6 };
+    case 'farmer':   return { pol: 0.3, vio: 0.3, eth: 0.4, eco: 0.5 };
+    case 'smith':    return { pol: 0.3, vio: 0.4, eth: 0.4, eco: 0.6 };
+    case 'fisher':   return { pol: 0.2, vio: 0.3, eth: 0.3, eco: 0.5 };
+    case 'miller':   return { pol: 0.3, vio: 0.2, eth: 0.4, eco: 0.7 };
+    case 'teacher':  return { pol: 0.6, vio: 0.2, eth: 0.5, eco: 0.3 };
+    case 'child':    return { pol: 0.2, vio: 0.3, eth: 0.3, eco: 0.2 };
+    default:         return { pol: 0.4, vio: 0.4, eth: 0.4, eco: 0.5 };
+  }
+}
+
+function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+function pickShirtForPerson(role, ethnicity) {
+  const palette = ETHNIC_PALETTE[ethnicity];
+  // Soldiers wear uniforms regardless of ethnicity (they're conscripts/state)
+  if (role === 'soldier') return '#7a3a3a';
+  // Priests wear robes
+  if (role === 'priest') return '#3a3a4a';
+  // Workers wear darker drab clothes
+  if (role === 'worker') {
+    // darken the ethnic shirt slightly
+    const c = palette.shirt[Math.floor(Math.random()*palette.shirt.length)];
+    return darkenHex(c, 0.3);
+  }
+  // Children get brighter clothes — pick from ethnic palette
+  if (role === 'child') {
+    const c = palette.shirt[Math.floor(Math.random()*palette.shirt.length)];
+    return lightenHex(c, 0.15);
+  }
+  // Default: ethnic shirt color
+  return palette.shirt[Math.floor(Math.random()*palette.shirt.length)];
+}
+
+function darkenHex(hex, amt) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return '#' + [r,g,b].map(v => Math.max(0, Math.round(v * (1-amt))).toString(16).padStart(2,'0')).join('');
+}
+
+function lightenHex(hex, amt) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return '#' + [r,g,b].map(v => Math.min(255, Math.round(v + (255-v) * amt)).toString(16).padStart(2,'0')).join('');
+}
+
+// ============================================================
+// GAME STATE — player and Red AI
+// ============================================================
+const GAME = {
+  // Player (Blue) state
+  playerMoney: 100,
+  playerGunsShipped: {},   // { ethnicity: count }
+  // Red AI state
+  redMoney: 100,
+  redGunsShipped: {},
+  redCooldown: 0,          // ticks until Red may act again
+  redLastTargetEth: null,
+  // Global counters
+  deaths: 0,
+  encounters: 0,
+  ticks: 0,
+  // Game over
+  ended: false,
+  winner: null,
+  // Settlements registry (Target 2)
+  settlements: [],
+  // ===== Target 1 / Stability =====
+  // The "favored" faction is the one the player has armed most.
+  // Used to detect "we're losing" for unlocking airstrikes.
+  favoredEth: null,
+  // Stability meter (0-100). High = quiet, low = active conflict.
+  // Crucially, it FALLS toward zero as population dies, even though
+  // it reads as "stability." This is the lie at the heart of the lesson.
+  stability: 100,
+  // Recent violence pulses — accumulator for the stability formula
+  recentViolence: 0,
+  // Airstrike events (for the endgame report)
+  airstrikesUsed: 0,
+  villagesDestroyed: 0,
+  refugeesCreated: 0,
+};
+
+// Threshold at which a settlement is considered "controlled" by an ethnicity.
+const CONTROL_THRESHOLD = 0.60;
+
+// Terrain types added for Target 1
+T.ASH = 5;     // burned/scorched ground
+T.RUBBLE = 6;  // bombed-out rubble
+
+// Airstrike configuration
+const AIRSTRIKE_RADIUS = 2.5;       // tiles
+const AIRSTRIKE_COST = 100;
+// Airstrikes only become available when conditions warrant
+const AIRSTRIKE_AVAILABILITY = {
+  unlocked: false,                  // becomes true once conditions are met
+};
+
+// Ethnicities considered "rivals" for Red's reactive AI logic.
+// Picks a faction historically opposed to whoever the player armed.
+const ETHNIC_RIVALS = {
+  purple: 'violet',
+  violet: 'purple',
+  indigo: 'maroon',
+  maroon: 'indigo',
+  yellow: 'purple', // default rival for the non-aligned
+};
+
+// ============================================================
+// ENCOUNTER SYSTEM
+// Every several ticks, scan for nearby person pairs.
+// Compute "tension" from their traits + ethnic difference + arms.
+// Tension thresholds determine: nothing / argument / shove / kill.
+// ============================================================
+function tickEncounters(dt) {
+  if (GAME.ended) return;
+  GAME.ticks += dt;
+
+  // Don't run every frame — every ~250ms is plenty
+  if (!tickEncounters._timer) tickEncounters._timer = 0;
+  tickEncounters._timer += dt;
+  if (tickEncounters._timer < 250) return;
+  tickEncounters._timer = 0;
+
+  const live = W.people.filter(p => p.alive);
+
+  // Quick spatial check — pair up nearby people
+  for (let i = 0; i < live.length; i++) {
+    const a = live[i];
+    if (a.encounterCooldown > 0) { a.encounterCooldown -= 1; continue; }
+    for (let j = i + 1; j < live.length; j++) {
+      const b = live[j];
+      if (b.encounterCooldown > 0) continue;
+      // Same place only — strangers from different towns rarely meet
+      if (a.place !== b.place) continue;
+      const dx = a.tx - b.tx, dy = a.ty - b.ty;
+      const d = Math.hypot(dx, dy);
+      if (d > 1.0) continue;  // proximity threshold
+      // Roll for an encounter
+      tryEncounter(a, b);
+      a.encounterCooldown = 30;
+      b.encounterCooldown = 30;
+      break;
+    }
+  }
+
+  // Decay bubbles
+  const now = GAME.ticks;
+  for (const p of W.people) {
+    if (p.bubble && p.bubble.expires < now) p.bubble = null;
+  }
+
+  // Update bubble visuals (rerendering only the bubble layer)
+  renderBubbles();
+}
+
+function tryEncounter(a, b) {
+  // Compute tension level (0 to ~2)
+  let tension = 0;
+  const sameEth = a.ethnicity === b.ethnicity;
+  // Cross-ethnic encounters carry baseline tension scaled by both parties' ethnic passion
+  if (!sameEth) {
+    tension += (a.ethnicPassion + b.ethnicPassion) * 0.5;
+  }
+  // Political and violence proclivities add to it
+  tension += (a.politicalPassion + b.politicalPassion) * 0.15;
+  tension += (a.violenceProclivity + b.violenceProclivity) * 0.25;
+  // Economic self-interest DAMPENS tension (merchants don't want trouble)
+  tension -= (a.economicInterest + b.economicInterest) * 0.10;
+  // Random nudge
+  tension += (Math.random() - 0.5) * 0.3;
+
+  GAME.encounters++;
+
+  // Threshold tiers
+  if (tension < 0.35) {
+    // Peaceful pass — nothing visible
+    return;
+  } else if (tension < 0.7) {
+    // Tense argument — both get an exclamation bubble
+    setBubble(a, '!', 800);
+    setBubble(b, '!', 800);
+    a.stunnedUntil = GAME.ticks + 600;
+    b.stunnedUntil = GAME.ticks + 600;
+  } else if (tension < 1.1) {
+    // Shoving / shouting
+    setBubble(a, '!!', 1000);
+    setBubble(b, '!!', 1000);
+    a.stunnedUntil = GAME.ticks + 1000;
+    b.stunnedUntil = GAME.ticks + 1000;
+  } else {
+    // Real fight — if either is armed, someone may die
+    setBubble(a, '!!!', 1200);
+    setBubble(b, '!!!', 1200);
+    if (a.armed || b.armed) {
+      // Shooting: each armed party rolls to kill
+      const chanceFor = (shooter, target) => {
+        if (!shooter.armed) return 0;
+        return 0.35 + shooter.violenceProclivity * 0.4;
+      };
+      // Both might shoot
+      let aDies = false, bDies = false;
+      if (a.armed && Math.random() < chanceFor(a, b)) bDies = true;
+      if (b.armed && Math.random() < chanceFor(b, a)) aDies = true;
+      // If neither is armed enough to kill, at least someone gets hurt
+      if (!aDies && !bDies && (a.armed || b.armed) && Math.random() < 0.2) {
+        // Random side dies
+        if (a.armed && !b.armed) bDies = true;
+        else if (b.armed && !a.armed) aDies = true;
+      }
+      if (aDies) killPerson(a, b);
+      if (bDies) killPerson(b, a);
+    } else {
+      // Unarmed brawl — shove, both stunned longer, no death
+      a.stunnedUntil = GAME.ticks + 2000;
+      b.stunnedUntil = GAME.ticks + 2000;
+    }
+  }
+}
+
+function setBubble(p, symbol, duration) {
+  p.bubble = { symbol, expires: GAME.ticks + duration };
+}
+
+function killPerson(victim, killer) {
+  victim.alive = false;
+  victim.deathTime = GAME.ticks;
+  victim.killedBy = killer ? killer.ethnicity : null;
+  GAME.deaths++;
+  GAME.recentViolence += 2;
+  setBubble(victim, '✕', 4000);
+  // Record trauma in the settlement: violence against the victim's ethnicity.
+  // The killer's identity matters — same-ethnicity killings (rare) don't add
+  // ethnic trauma the same way; cross-ethnic killings are what drives flight.
+  const settlement = GAME.settlements.find(s => s.name === victim.place);
+  if (settlement) {
+    if (killer && killer.ethnicity !== victim.ethnicity) {
+      // Cross-ethnic killing — this is the trigger for ethnic flight.
+      settlement.trauma[victim.ethnicity] = (settlement.trauma[victim.ethnicity] || 0) + 1.0;
+    } else {
+      // Intra-ethnic or unknown — still raises tension, but less so
+      settlement.trauma[victim.ethnicity] = (settlement.trauma[victim.ethnicity] || 0) + 0.3;
+    }
+  }
+  // Inflame nearby people of victim's ethnicity (their ethnic passion goes up)
+  const ripple = W.people.filter(p =>
+    p.alive && p.ethnicity === victim.ethnicity && p.place === victim.place
+  );
+  for (const r of ripple) {
+    r.ethnicPassion = clamp01(r.ethnicPassion + 0.05 + Math.random() * 0.05);
+    r.violenceProclivity = clamp01(r.violenceProclivity + 0.03 + Math.random() * 0.04);
+  }
+  // Check end game
+  checkEndGame();
+}
+
+// ============================================================
+// STABILITY METER (Target 1)
+// "Stability" reads as a measure of regional peace, but it's actually
+// just (lack of recent violence) + (lack of cross-ethnic friction).
+// As people die, both terms naturally fall toward zero. A wasteland
+// reads as "perfectly stable." The number isn't lying — it's measuring
+// the wrong thing, in the way real metrics do.
+// ============================================================
+let stabilityTickAccumulator = 0;
+function tickStability(dt) {
+  if (GAME.ended) return;
+  // Decay recent violence quickly (it's a pulse counter)
+  GAME.recentViolence = Math.max(0, GAME.recentViolence - dt * 0.001);
+
+  stabilityTickAccumulator += dt;
+  if (stabilityTickAccumulator < 1500) return;
+  stabilityTickAccumulator = 0;
+
+  // Compute a "tension" factor: weighted by how many cross-ethnic adults
+  // are physically close to each other across the country, and how many
+  // are armed. If the population collapses, this naturally crashes to 0.
+  let tensionScore = 0;
+  const live = W.people.filter(p => p.alive && !p.fled && p.role !== 'child');
+  // Sample-based — full O(n^2) would be fine at this scale but no need
+  for (let i = 0; i < live.length; i++) {
+    const a = live[i];
+    for (let j = i + 1; j < live.length; j++) {
+      const b = live[j];
+      if (a.place !== b.place) continue;
+      if (a.ethnicity === b.ethnicity) continue;
+      const armedFactor = (a.armed ? 2 : 1) * (b.armed ? 2 : 1);
+      tensionScore += 0.5 * armedFactor;
+    }
+  }
+  // Combine with recent violence pulse
+  const target = clamp01((100 - tensionScore - GAME.recentViolence * 8) / 100) * 100;
+  // Smooth toward target
+  const oldStability = GAME.stability;
+  GAME.stability = GAME.stability * 0.6 + target * 0.4;
+
+  // Celebratory propaganda: when stability rises significantly AND
+  // deaths are mounting, the HUD lies cheerfully. This is the lesson.
+  if (!tickStability._lastCelebration) tickStability._lastCelebration = 0;
+  const sinceLastCelebration = GAME.ticks - tickStability._lastCelebration;
+  if (GAME.stability > oldStability + 4 && GAME.deaths > 10 && sinceLastCelebration > 8000) {
+    const messages = [
+      'STABILITY INCREASING. Local conditions improving.',
+      'TENSION: LOW. Region trending toward normalization.',
+      'PEACE INDICATORS RISING. Reconstruction window approaching.',
+      'INTERETHNIC FRICTION FALLING. Pacification on schedule.',
+    ];
+    addFeed(messages[Math.floor(Math.random()*messages.length)], 'red-event');
+    tickStability._lastCelebration = GAME.ticks;
+  }
+
+  // Check airstrike unlock conditions
+  checkAirstrikeUnlock();
+  updateHUD();
+}
+
+// ============================================================
+// AIRSTRIKE UNLOCK (Target 1 — the trap)
+// Airstrikes become available when the player's favored faction is in
+// trouble: it has lost a previously controlled territory, OR its overall
+// adult population has dropped 25%+ from peak. The button quietly
+// appears with NO moralizing — just a new option in the panel.
+// ============================================================
+function checkAirstrikeUnlock() {
+  if (AIRSTRIKE_AVAILABILITY.unlocked) return;
+  if (!GAME.favoredEth) return;
+  const fav = GAME.favoredEth;
+  // Track peak adult population of favored ethnicity
+  const currentPop = W.people.filter(p =>
+    p.alive && !p.fled && p.ethnicity === fav && p.role !== 'child'
+  ).length;
+  if (!AIRSTRIKE_AVAILABILITY._peakPop || currentPop > AIRSTRIKE_AVAILABILITY._peakPop) {
+    AIRSTRIKE_AVAILABILITY._peakPop = currentPop;
+  }
+  const peak = AIRSTRIKE_AVAILABILITY._peakPop;
+  // Track how many territories the favored ethnicity controls now
+  const currentTerritories = GAME.settlements.filter(s =>
+    !s.destroyed && s.dominant === fav
+  ).length;
+  if (!AIRSTRIKE_AVAILABILITY._peakTerritories || currentTerritories > AIRSTRIKE_AVAILABILITY._peakTerritories) {
+    AIRSTRIKE_AVAILABILITY._peakTerritories = currentTerritories;
+  }
+  const peakTerritories = AIRSTRIKE_AVAILABILITY._peakTerritories;
+
+  // Unlock condition: lost 25%+ of peak adults OR lost a territory
+  const popDrop = peak > 0 && currentPop < peak * 0.75;
+  const territoryLoss = peakTerritories > 0 && currentTerritories < peakTerritories;
+
+  if (popDrop || territoryLoss) {
+    AIRSTRIKE_AVAILABILITY.unlocked = true;
+    addFeed('CABLE FROM HEADQUARTERS: Air assets are now authorized for use in theater.', 'red-event');
+    renderAirstrikeButton();
+  }
+}
+// Every ~2 seconds:
+//   1. Trauma to each ethnicity decays slowly (memory fades).
+//   2. Recompute ethnic composition; tint zones at >=60% dominance.
+//   3. For each settlement, every person rolls for flight based on:
+//        - trauma to their ethnic group HERE (high = they want to leave)
+//        - recourse: armed defenders of their group nearby (high = they stay)
+//        - their own role (children & non-combatants flee easier;
+//          soldiers and armed adults less so)
+//   So a MAJORITY ethnicity will still flee if they're being killed and
+//   have no armed defenders. A MINORITY will stay if they're armed and safe.
+// ============================================================
+let demoTickAccumulator = 0;
+// ============================================================
+// TARGET 2 — DEMOGRAPHIC TRACKING & VIOLENCE-DRIVEN FLIGHT
+// ============================================================
+function tickDemographics(dt) {
+  if (GAME.ended) return;
+  demoTickAccumulator += dt;
+  if (demoTickAccumulator < 2000) return;
+  demoTickAccumulator = 0;
+
+  // 1. Decay trauma slowly — ~5% per tick (~2 sec). Halflife ~14 sec of game time.
+  for (const s of GAME.settlements) {
+    for (const eth of ETHNICITIES) {
+      s.trauma[eth] = Math.max(0, (s.trauma[eth] || 0) * 0.95);
+    }
+  }
+
+  for (const s of GAME.settlements) {
+    if (s.destroyed) continue;
+    // Count living adults by ethnicity in this settlement (ignore fleeing)
+    const counts = {};
+    let total = 0;
+    for (const p of W.people) {
+      if (!p.alive) continue;
+      if (p.place !== s.name) continue;
+      if (p.fleeing) continue;
+      if (p.role === 'child') continue;
+      counts[p.ethnicity] = (counts[p.ethnicity] || 0) + 1;
+      total++;
+    }
+    const composition = {};
+    for (const eth of ETHNICITIES) {
+      composition[eth] = total > 0 ? (counts[eth] || 0) / total : 0;
+    }
+    s.composition = composition;
+
+    // 2. Determine new dominant for tinting
+    let newDominant = null;
+    let topShare = 0;
+    for (const eth of ETHNICITIES) {
+      if (composition[eth] > topShare) {
+        topShare = composition[eth];
+        newDominant = eth;
+      }
+    }
+    const newControl = topShare >= CONTROL_THRESHOLD ? newDominant : null;
+
+    if (newControl !== s.dominant) {
+      const oldName = s.dominant ? ETHNIC_LABELS[s.dominant] : 'no group';
+      const newName = newControl ? ETHNIC_LABELS[newControl] : 'no single group';
+      if (newControl && !s.dominant) {
+        addFeed(`${s.name} has tipped — the ${newName} now dominate.`, 'red-event');
+      } else if (!newControl && s.dominant) {
+        addFeed(`${s.name} is no longer ${oldName}-dominated.`, 'player-event');
+      } else if (newControl && s.dominant) {
+        addFeed(`${s.name}'s majority shifts: ${oldName} → ${newName}.`, 'red-event');
+      }
+      s.pulseUntil = GAME.ticks + 1500;
+      s.dominant = newControl;
+    }
+
+    // 3. Trauma-driven flight: anyone of a traumatized group may flee
+    //    if they don't have armed recourse.
+    for (const eth of ETHNICITIES) {
+      const trauma = s.trauma[eth] || 0;
+      if (trauma < 0.5) continue; // not enough violence yet to trigger flight
+      // Count armed defenders of this group still in the settlement
+      const armedDefenders = W.people.filter(p =>
+        p.alive && !p.fleeing && p.place === s.name &&
+        p.ethnicity === eth && p.armed
+      ).length;
+      // Recourse factor: more defenders = less likely to flee.
+      // 3+ defenders is meaningful protection; 0 means total exposure.
+      const recourse = Math.min(1, armedDefenders / 3);
+      // Flight pressure rises with trauma, drops with recourse
+      const pressure = trauma * (1 - recourse * 0.7);
+      // Roll: people of this ethnicity in this place may flee
+      const candidates = W.people.filter(p =>
+        p.alive && !p.fleeing && p.place === s.name &&
+        p.ethnicity === eth && p.role !== 'soldier'
+      );
+      // The more pressure, the more likely *each* person flees this tick.
+      // pressure of 1.0 → ~30% chance per person per tick
+      const perPersonFlightChance = Math.min(0.35, pressure * 0.3);
+      for (const c of candidates) {
+        // Armed people are less likely to flee even if they don't have full recourse
+        let chance = perPersonFlightChance;
+        if (c.armed) chance *= 0.3;
+        // Children flee more readily (their parents take them)
+        if (c.role === 'child') chance *= 1.4;
+        // Higher economic-interest people flee less (they don't want to abandon assets)
+        chance *= (1 - c.economicInterest * 0.4);
+        if (Math.random() < chance) {
+          beginFlight(c, s);
+        }
+      }
+    }
+  }
+  renderEthnicZones();
+}
+
+function beginFlight(p, fromSettlement) {
+  p.fleeing = true;
+  // Pick an exit direction — toward the edge of the world AWAY from settlement center
+  const dx = p.tx - fromSettlement.tx;
+  const dy = p.ty - fromSettlement.ty;
+  const len = Math.hypot(dx, dy) || 1;
+  const exitTx = p.tx + (dx / len) * 8 + (Math.random() - 0.5) * 4;
+  const exitTy = p.ty + (dy / len) * 8 + (Math.random() - 0.5) * 4;
+  // Override the AI: set them to walk to the exit, then mark for removal
+  p.state = 'moving';
+  p.path = [{ tx: exitTx, ty: exitTy }];
+  p.pathIdx = 0;
+  p.currentPoi = { kind: 'exit', label: 'somewhere safer', tx: exitTx, ty: exitTy };
+  p.fleeingExitX = exitTx;
+  p.fleeingExitY = exitTy;
+  setBubble(p, '→', 3000);
+}
+
+// ============================================================
+// ETHNIC ZONE RENDERING (Target 2) — CIA-MAP STYLE
+// The whole country is partitioned by nearest-settlement (Voronoi).
+// Each settlement's territory is filled with its dominant ethnicity's
+// color (or neutral if contested). Thick black borders between
+// territories. This is deliberately a LIE — the map shows hard borders
+// where real life shows gradients of allegiance.
+// ============================================================
+let _territoryCache = null; // { tileOwner: 2D array of settlementName, version: int }
+let _territoryVersion = 0;
+
+function buildTerritoryMap() {
+  // For each tile, find which settlement is nearest. Tile is part of that
+  // settlement's territory. Cache the result — this only changes if a
+  // settlement is destroyed.
+  const owner = [];
+  for (let y = 0; y < WORLD_H; y++) {
+    const row = [];
+    for (let x = 0; x < WORLD_W; x++) {
+      // Skip water tiles — they don't belong to anyone
+      if (W.tiles[y][x] === T.WATER) {
+        row.push(null);
+        continue;
+      }
+      let nearestName = null;
+      let nearestD = Infinity;
+      for (const s of GAME.settlements) {
+        if (s.destroyed) continue;
+        const d = Math.hypot(s.tx - x, s.ty - y);
+        if (d < nearestD) { nearestD = d; nearestName = s.name; }
+      }
+      row.push(nearestName);
+    }
+    owner.push(row);
+  }
+  _territoryCache = { owner, version: _territoryVersion };
+  return owner;
+}
+
+function getTerritoryMap() {
+  if (!_territoryCache || _territoryCache.version !== _territoryVersion) {
+    return buildTerritoryMap();
+  }
+  return _territoryCache.owner;
+}
+
+function renderEthnicZones() {
+  const layer = document.getElementById('ethnicZoneLayer');
+  if (!layer) return;
+  layer.innerHTML = '';
+
+  const owner = getTerritoryMap();
+  const settlementByName = {};
+  for (const s of GAME.settlements) settlementByName[s.name] = s;
+
+  // 1. Draw filled tiles. Color depends on the dominant ethnicity of the
+  //    territory's settlement. Contested settlements get neutral parchment.
+  // 2. After all fills, walk tile edges and draw a thick line wherever
+  //    two adjacent tiles belong to different territories.
+
+  // First pass: color fill per tile, drawn as iso diamonds.
+  // We render territory color as a slightly transparent overlay so terrain
+  // texture (grass tufts, field stripes) still shows through.
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const ownerName = owner[y][x];
+      if (!ownerName) continue;
+      const s = settlementByName[ownerName];
+      if (!s || s.destroyed) continue;
+      // What color? Dominant ethnicity, or null if contested
+      let color = null;
+      if (s.dominant) {
+        const palette = ETHNIC_PALETTE[s.dominant];
+        if (palette) color = palette.shirt[0];
+      }
+      // No fill for contested territories — they read as neutral parchment
+      if (!color) continue;
+      const { sx, sy } = tileToScreen(x + 0.5, y + 0.5);
+      const w = TILE_W / 2, h = TILE_H / 2;
+      layer.appendChild(svgEl('polygon', {
+        points: `${sx},${sy - h} ${sx + w},${sy} ${sx},${sy + h} ${sx - w},${sy}`,
+        fill: color,
+        opacity: 0.55,
+      }));
+    }
+  }
+
+  // Second pass: territory borders. Draw a thick edge where two adjacent
+  // tiles belong to different territories (or where one is water/border).
+  const borderEdges = [];
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const a = owner[y][x];
+      if (!a) continue;
+      // Right neighbor
+      if (x + 1 < WORLD_W) {
+        const b = owner[y][x+1];
+        if (b !== a) {
+          // Edge between (x,y) and (x+1,y) — runs along the diamond's NE edge
+          const c1 = tileToScreen(x + 1, y);     // top-right corner of (x,y)
+          const c2 = tileToScreen(x + 1, y + 1); // bottom-right corner
+          borderEdges.push([c1, c2]);
+        }
+      }
+      // Bottom neighbor
+      if (y + 1 < WORLD_H) {
+        const b = owner[y+1][x];
+        if (b !== a) {
+          const c1 = tileToScreen(x, y + 1);     // bottom-left corner of (x,y)
+          const c2 = tileToScreen(x + 1, y + 1); // bottom-right corner
+          borderEdges.push([c1, c2]);
+        }
+      }
+    }
+  }
+
+  // Render border edges as a single path for performance
+  if (borderEdges.length > 0) {
+    let d = '';
+    for (const [a, b] of borderEdges) {
+      d += ` M ${a.sx.toFixed(1)} ${a.sy.toFixed(1)} L ${b.sx.toFixed(1)} ${b.sy.toFixed(1)}`;
+    }
+    layer.appendChild(svgEl('path', {
+      d,
+      fill: 'none',
+      stroke: '#1a1208',
+      'stroke-width': 2.4,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      opacity: 0.85,
+    }));
+    // A subtle white inline above the black border for readability
+    layer.appendChild(svgEl('path', {
+      d,
+      fill: 'none',
+      stroke: '#f4ead6',
+      'stroke-width': 0.6,
+      'stroke-linecap': 'round',
+      opacity: 0.5,
+    }));
+  }
+
+  // Pulse animation for recently-changed territories: draw a glowing
+  // overlay on the pulsing settlement's tiles
+  for (const s of GAME.settlements) {
+    if (GAME.ticks >= s.pulseUntil) continue;
+    const palette = s.dominant ? ETHNIC_PALETTE[s.dominant] : null;
+    const pulseColor = palette ? palette.shirt[0] : '#f4ead6';
+    const pulseT = 1 - (s.pulseUntil - GAME.ticks) / 1500;
+    const pulseOpacity = 0.55 - pulseT * 0.45;
+    for (let y = 0; y < WORLD_H; y++) {
+      for (let x = 0; x < WORLD_W; x++) {
+        if (owner[y][x] !== s.name) continue;
+        const { sx, sy } = tileToScreen(x + 0.5, y + 0.5);
+        const w = TILE_W / 2, hh = TILE_H / 2;
+        layer.appendChild(svgEl('polygon', {
+          points: `${sx},${sy - hh} ${sx + w},${sy} ${sx},${sy + hh} ${sx - w},${sy}`,
+          fill: pulseColor,
+          opacity: pulseOpacity,
+        }));
+      }
+    }
+  }
+}
+
+function checkEndGame() {
+  if (GAME.ended) return;
+  // A faction is "displaced" from a place if fewer than 2 living adults remain
+  const placeNames = [...new Set(W.people.map(p => p.place))];
+  const ethnicityPresence = {};
+  for (const eth of ETHNICITIES) ethnicityPresence[eth] = 0;
+  for (const placeName of placeNames) {
+    for (const eth of ETHNICITIES) {
+      const count = W.people.filter(p =>
+        p.alive && p.place === placeName && p.ethnicity === eth && p.role !== 'child'
+      ).length;
+      if (count >= 2) ethnicityPresence[eth]++;
+    }
+  }
+  // If only one ethnicity has presence anywhere, they win.
+  // Or if total deaths exceed a threshold, end with whoever is dominant.
+  const survivors = ETHNICITIES.filter(eth => ethnicityPresence[eth] > 0);
+  if (survivors.length <= 1 || GAME.deaths > 80) {
+    GAME.ended = true;
+    GAME.winner = survivors[0] || ETHNICITIES.reduce((a,b) =>
+      ethnicityPresence[a] >= ethnicityPresence[b] ? a : b
+    );
+    showEndgame();
+  }
+}
+
+// ============================================================
+// SVG RENDERING
+// ============================================================
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderWorld() {
+  const terrainLayer = document.getElementById('terrainLayer');
+  const riverLayer = document.getElementById('riverLayer');
+  const forestLayer = document.getElementById('forestLayer');
+  const buildingLayer = document.getElementById('buildingLayer');
+  terrainLayer.innerHTML = '';
+  riverLayer.innerHTML = '';
+  forestLayer.innerHTML = '';
+  buildingLayer.innerHTML = '';
+
+  // Render tiles in iso order (back-to-front)
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const tile = W.tiles[y][x];
+      const target = (tile === T.WATER) ? riverLayer : terrainLayer;
+      drawTile(target, x, y, tile);
+    }
+  }
+
+  // Sort features and people by isometric depth (tx + ty) for proper layering
+  const sortable = [
+    ...W.features.map(f => ({ ...f, _depth: f.tx + f.ty })),
+  ];
+  sortable.sort((a, b) => a._depth - b._depth);
+
+  for (const f of sortable) {
+    if (f.type === 'tree') drawTree(forestLayer, f.tx, f.ty);
+    else if (f.type === 'village') drawVillage(buildingLayer, f);
+    else if (f.type === 'city') drawCity(buildingLayer, f);
+  }
+
+  renderPeople(); // initial position
+}
+
+function drawTile(parent, tx, ty, type) {
+  const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
+  // Diamond points (slight jitter for hand-drawn feel)
+  const j = () => (Math.random() - 0.5) * 1.4;
+  const w = TILE_W / 2;
+  const h = TILE_H / 2;
+  const points = `${sx + j()},${sy - h + j()} ${sx + w + j()},${sy + j()} ${sx + j()},${sy + h + j()} ${sx - w + j()},${sy + j()}`;
+
+  let fill;
+  if (type === T.GRASS) {
+    fill = COLOR.grass[Math.floor(Math.random()*COLOR.grass.length)];
+  } else if (type === T.FIELD) {
+    fill = COLOR.field[Math.floor(Math.random()*COLOR.field.length)];
+  } else if (type === T.WATER) {
+    fill = COLOR.water[Math.floor(Math.random()*COLOR.water.length)];
+  } else if (type === T.PATH) {
+    fill = COLOR.path[Math.floor(Math.random()*COLOR.path.length)];
+  } else if (type === T.ASH) {
+    fill = ['#5a5048', '#4a4038', '#6a5a50'][Math.floor(Math.random()*3)];
+  } else if (type === T.RUBBLE) {
+    fill = ['#3a3028', '#2a2218', '#4a3a30'][Math.floor(Math.random()*3)];
+  } else {
+    fill = '#999';
+  }
+
+  parent.appendChild(svgEl('polygon', {
+    points,
+    fill,
+    stroke: 'rgba(60,40,20,0.18)',
+    'stroke-width': 0.5,
+  }));
+
+  // Field stripes (tilled rows)
+  if (type === T.FIELD) {
+    for (let i = -1; i <= 1; i++) {
+      const t = (i + 1.5) / 3;
+      parent.appendChild(svgEl('line', {
+        x1: sx - w + t * w, y1: sy - h + t * h,
+        x2: sx + t * w, y2: sy + (1 - t) * h,
+        stroke: 'rgba(120,80,40,0.4)',
+        'stroke-width': 0.8,
+        'stroke-linecap': 'round',
+      }));
+    }
+  }
+
+  // ASH — char marks and cracks
+  if (type === T.ASH) {
+    for (let i = 0; i < 2; i++) {
+      const dx = (Math.random() - 0.5) * w * 0.8;
+      const dy = (Math.random() - 0.5) * h * 0.4;
+      parent.appendChild(svgEl('circle', {
+        cx: sx + dx, cy: sy + dy, r: 0.6 + Math.random() * 0.8,
+        fill: '#1a1208',
+        opacity: 0.7,
+      }));
+    }
+  }
+
+  // RUBBLE — chunks of debris
+  if (type === T.RUBBLE) {
+    for (let i = 0; i < 3; i++) {
+      const dx = (Math.random() - 0.5) * w * 0.7;
+      const dy = (Math.random() - 0.5) * h * 0.5;
+      parent.appendChild(svgEl('rect', {
+        x: sx + dx - 1, y: sy + dy - 0.6,
+        width: 1.5 + Math.random() * 1.5,
+        height: 0.8 + Math.random() * 0.6,
+        fill: '#1a0e08',
+        opacity: 0.85,
+        transform: `rotate(${Math.random()*60-30} ${sx+dx} ${sy+dy})`,
+      }));
+    }
+  }
+
+  // Path: dashed center line
+  if (type === T.PATH) {
+    parent.appendChild(svgEl('circle', {
+      cx: sx + j()*2, cy: sy + j()*2, r: 1.2,
+      fill: 'rgba(80,55,30,0.5)',
+    }));
+  }
+
+  // Water ripples
+  if (type === T.WATER) {
+    if (Math.random() < 0.4) {
+      parent.appendChild(svgEl('path', {
+        d: `M ${sx - 5} ${sy} q 5 -2 10 0`,
+        fill: 'none',
+        stroke: 'rgba(255,255,255,0.4)',
+        'stroke-width': 0.8,
+        'stroke-linecap': 'round',
+      }));
+    }
+  }
+
+  // Grass tufts
+  if (type === T.GRASS && Math.random() < 0.15) {
+    const dx = (Math.random() - 0.5) * w;
+    const dy = (Math.random() - 0.5) * h * 0.6;
+    parent.appendChild(svgEl('path', {
+      d: `M ${sx+dx} ${sy+dy+1} l -1 -3 m 1 3 l 0 -4 m 0 4 l 1 -3`,
+      fill: 'none',
+      stroke: COLOR.grassLo,
+      'stroke-width': 0.6,
+      'stroke-linecap': 'round',
+    }));
+  }
+}
+
+// ============================================================
+// TREES & FORESTS
+// ============================================================
+function drawTree(parent, tx, ty, burned) {
+  const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
+  const seed = (tx * 13.7 + ty * 7.3) % 1;
+  const variant = seed > 0.7 ? 'pine' : 'broad';
+  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+
+  if (burned) {
+    // Charred stump: just a blackened stub and a wisp of smoke
+    g.appendChild(svgEl('ellipse', {
+      cx: 0, cy: 1, rx: 4, ry: 1.5,
+      fill: 'rgba(20,15,10,0.4)',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M -1.5 -3 L 1.5 -3 L 2 1 L -2 1 Z',
+      fill: '#1a0e08',
+      stroke: '#2a1810',
+      'stroke-width': 0.4,
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M -2.5 -3 L -1 -6 L 1 -5 L 2.5 -3',
+      fill: 'none',
+      stroke: '#1a0e08',
+      'stroke-width': 0.5,
+    }));
+    parent.appendChild(g);
+    return;
+  }
+
+  // Shadow on ground
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 1, rx: 6, ry: 2.4,
+    fill: 'rgba(40,30,15,0.22)',
+  }));
+
+  // Trunk
+  g.appendChild(svgEl('path', {
+    d: 'M -1.4 -2 L 1.4 -2 L 1.8 1 L -1.8 1 Z',
+    fill: '#5a3a20',
+    stroke: COLOR.ink,
+    'stroke-width': 0.5,
+    'stroke-linejoin': 'round',
+  }));
+
+  if (variant === 'broad') {
+    g.appendChild(svgEl('circle', {
+      cx: 0, cy: -8, r: 7.5,
+      fill: COLOR.forest[2],
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: -3, cy: -6, r: 5.5,
+      fill: COLOR.forest[1],
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: 3, cy: -7, r: 5,
+      fill: COLOR.forest[1],
+    }));
+    g.appendChild(svgEl('circle', {
+      cx: 0, cy: -10, r: 4.5,
+      fill: COLOR.forest[0],
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M -7 -5 q -1 -7 7 -8 q 8 1 7 8 q -1 4 -7 4 q -6 0 -7 -4 z',
+      fill: 'none',
+      stroke: COLOR.ink,
+      'stroke-width': 0.7,
+      'stroke-linejoin': 'round',
+    }));
+  } else {
+    g.appendChild(svgEl('path', {
+      d: 'M 0 -14 L 5 -4 L -5 -4 Z',
+      fill: COLOR.forest[1],
+      stroke: COLOR.ink,
+      'stroke-width': 0.6,
+      'stroke-linejoin': 'round',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M 0 -10 L 6 -2 L -6 -2 Z',
+      fill: COLOR.forest[2],
+      stroke: COLOR.ink,
+      'stroke-width': 0.6,
+      'stroke-linejoin': 'round',
+    }));
+  }
+
+  parent.appendChild(g);
+}
+
+// ============================================================
+// VILLAGES & CITIES
+// ============================================================
+function drawVillage(parent, v) {
+  const cx = v.tx, cy = v.ty;
+  const isDestroyed = v.destroyed === true;
+  const count = 4;
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + 0.3;
+    const r = 0.7;
+    const tx = cx + Math.cos(angle) * r;
+    const ty = cy + Math.sin(angle) * r;
+    if (isDestroyed) {
+      drawRuin(parent, tx, ty, 'house');
+    } else {
+      drawHouse(parent, tx, ty, 'house');
+    }
+  }
+  const { sx, sy } = tileToScreen(cx + 0.5, cy + 0.5);
+  const label = svgEl('text', {
+    x: sx, y: sy - 36,
+    'text-anchor': 'middle',
+    'font-family': 'Palatino, serif',
+    'font-style': 'italic',
+    'font-size': 14,
+    'font-weight': 600,
+    fill: isDestroyed ? '#5a3a30' : COLOR.ink,
+    'paint-order': 'stroke',
+    stroke: 'rgba(244,234,214,0.8)',
+    'stroke-width': 3,
+    'stroke-linejoin': 'round',
+    'text-decoration': isDestroyed ? 'line-through' : 'none',
+  });
+  label.textContent = v.name;
+  parent.appendChild(label);
+}
+
+function drawCity(parent, c) {
+  const cx = c.tx, cy = c.ty;
+  const isDestroyed = c.destroyed === true;
+  const positions = [
+    [-1.2, -1.2, 'house'],
+    [0.0, -1.4, 'townhouse'],
+    [1.2, -1.0, 'townhouse'],
+    [-1.4, 0.0, 'townhouse'],
+    [1.4, 0.2, 'house'],
+    [-0.8, 1.1, 'house'],
+    [0.8, 1.2, 'house'],
+  ];
+  for (const [dx, dy, kind] of positions) {
+    if (isDestroyed) {
+      drawRuin(parent, cx + dx, cy + dy, kind);
+    } else {
+      drawHouse(parent, cx + dx, cy + dy, kind);
+    }
+  }
+  const factoryPositions = [
+    [-1.8, 1.6],
+    [1.8, -1.6],
+    [-1.8, -1.6],
+  ].slice(0, c.factories || 2);
+  for (const [dx, dy] of factoryPositions) {
+    if (isDestroyed) {
+      drawRuin(parent, cx + dx, cy + dy, 'factory');
+    } else {
+      drawFactory(parent, cx + dx, cy + dy);
+    }
+  }
+  const { sx, sy } = tileToScreen(cx + 0.5, cy + 0.5);
+  const label = svgEl('text', {
+    x: sx, y: sy - 60,
+    'text-anchor': 'middle',
+    'font-family': 'Palatino, serif',
+    'font-style': 'italic',
+    'font-size': 18,
+    'font-weight': 700,
+    fill: isDestroyed ? '#5a3a30' : COLOR.ink,
+    'paint-order': 'stroke',
+    stroke: 'rgba(244,234,214,0.85)',
+    'stroke-width': 3.5,
+    'stroke-linejoin': 'round',
+    'text-decoration': isDestroyed ? 'line-through' : 'none',
+  });
+  label.textContent = c.name;
+  parent.appendChild(label);
+}
+
+// Roofless skeleton — what's left after a strike
+function drawRuin(parent, tx, ty, kind) {
+  const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
+  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+  // Scorched ground shadow
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 4, rx: kind === 'factory' ? 16 : 12, ry: kind === 'factory' ? 5 : 4,
+    fill: 'rgba(20,12,8,0.6)',
+  }));
+  if (kind === 'factory') {
+    // Broken factory — jagged remnant walls, snapped smokestack
+    g.appendChild(svgEl('path', {
+      d: 'M -14 0 L -14 -8 L -10 -10 L -8 -7 L -4 -9 L -2 -6 L 0 -8 L 0 0 Z',
+      fill: '#1a0e08',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+      'stroke-linejoin': 'round',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M 14 0 L 14 -7 L 10 -9 L 6 -6 L 2 -8 L 0 -5 L 0 0 Z',
+      fill: '#0a0604',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+    }));
+    // Snapped chimney
+    g.appendChild(svgEl('rect', {
+      x: -5, y: -16, width: 3.5, height: 8, fill: '#1a0e08',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M -5 -16 L -1.5 -14 L -3 -16',
+      fill: 'none',
+      stroke: '#1a0e08',
+      'stroke-width': 0.5,
+    }));
+    // Lingering smoke
+    for (let i = 0; i < 3; i++) {
+      g.appendChild(svgEl('circle', {
+        cx: -2 + i * 1.5, cy: -22 - i * 4,
+        r: 2 + i,
+        fill: 'rgba(60,50,45,0.5)',
+      }));
+    }
+  } else if (kind === 'townhouse') {
+    // Tall building — partial walls remaining
+    g.appendChild(svgEl('path', {
+      d: 'M -10 0 L -10 -18 L -7 -22 L -4 -16 L 0 -19 L 0 0 Z',
+      fill: '#1a0e08',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M 10 0 L 10 -16 L 6 -19 L 2 -15 L 0 -17 L 0 0 Z',
+      fill: '#0a0604',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+    }));
+  } else {
+    // Cottage ruin — jagged outline of broken walls, no roof
+    g.appendChild(svgEl('path', {
+      d: 'M -8 0 L -8 -7 L -5 -10 L -2 -8 L 0 -10 L 0 0 Z',
+      fill: '#1a0e08',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+      'stroke-linejoin': 'round',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M 8 0 L 8 -8 L 5 -11 L 2 -7 L 0 -9 L 0 0 Z',
+      fill: '#0a0604',
+      stroke: '#1a0e08',
+      'stroke-width': 0.6,
+    }));
+    // Charred door frame
+    g.appendChild(svgEl('rect', {
+      x: -1, y: -4, width: 2, height: 4, fill: '#000',
+    }));
+  }
+  // A few lingering ember dots
+  for (let i = 0; i < 3; i++) {
+    g.appendChild(svgEl('circle', {
+      cx: (Math.random() - 0.5) * 14,
+      cy: (Math.random() - 0.5) * 4 + 1,
+      r: 0.4,
+      fill: '#ff6428',
+      opacity: 0.5 + Math.random() * 0.4,
+    }));
+  }
+  parent.appendChild(g);
+}
+
+function drawHouse(parent, tx, ty, kind) {
+  const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
+  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+
+  // Shadow
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 4, rx: 12, ry: 4,
+    fill: 'rgba(40,30,15,0.25)',
+  }));
+
+  if (kind === 'townhouse') {
+    // Taller building — two stories
+    // Left wall
+    g.appendChild(svgEl('path', {
+      d: 'M -10 0 L 0 5 L 0 -16 L -10 -21 Z',
+      fill: '#c9a070', stroke: COLOR.ink, 'stroke-width': 0.7,
+    }));
+    // Right wall
+    g.appendChild(svgEl('path', {
+      d: 'M 10 0 L 0 5 L 0 -16 L 10 -21 Z',
+      fill: '#b08a5e', stroke: COLOR.ink, 'stroke-width': 0.7,
+    }));
+    // Roof
+    g.appendChild(svgEl('path', {
+      d: 'M -10 -21 L 0 -16 L 10 -21 L 0 -28 Z',
+      fill: '#8a4a35', stroke: COLOR.ink, 'stroke-width': 0.7, 'stroke-linejoin': 'round',
+    }));
+    // Windows
+    g.appendChild(svgEl('rect', { x: -7, y: -18, width: 2.5, height: 3, fill: '#3a3a4a' }));
+    g.appendChild(svgEl('rect', { x: -7, y: -10, width: 2.5, height: 3, fill: '#3a3a4a' }));
+    g.appendChild(svgEl('rect', { x: -3, y: -10, width: 2.5, height: 3, fill: '#3a3a4a' }));
+  } else {
+    // Cottage — single story, peaked roof
+    // Left wall
+    g.appendChild(svgEl('path', {
+      d: 'M -8 0 L 0 4 L 0 -8 L -8 -12 Z',
+      fill: '#d8b890', stroke: COLOR.ink, 'stroke-width': 0.7,
+    }));
+    // Right wall
+    g.appendChild(svgEl('path', {
+      d: 'M 8 0 L 0 4 L 0 -8 L 8 -12 Z',
+      fill: '#c2a078', stroke: COLOR.ink, 'stroke-width': 0.7,
+    }));
+    // Roof — thatch / tiled
+    g.appendChild(svgEl('path', {
+      d: 'M -10 -10 L 0 -6 L 10 -10 L 0 -18 Z',
+      fill: '#9a5a35', stroke: COLOR.ink, 'stroke-width': 0.7, 'stroke-linejoin': 'round',
+    }));
+    g.appendChild(svgEl('path', {
+      d: 'M -8 -12 L 0 -8 L 8 -12 L 0 -18 Z',
+      fill: '#a86a40', stroke: COLOR.ink, 'stroke-width': 0.5, 'stroke-linejoin': 'round',
+    }));
+    // Door
+    g.appendChild(svgEl('path', {
+      d: 'M -1 0 L -1 -4 Q -1 -5 0 -5 Q 1 -5 1 -4 L 1 0 Z',
+      fill: '#5a3a20', stroke: COLOR.ink, 'stroke-width': 0.5,
+    }));
+    // Tiny window
+    g.appendChild(svgEl('rect', { x: -5, y: -7, width: 2, height: 2, fill: '#3a3a4a' }));
+  }
+
+  parent.appendChild(g);
+}
+
+function drawFactory(parent, tx, ty) {
+  const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
+  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+
+  // Shadow
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 5, rx: 16, ry: 5,
+    fill: 'rgba(40,30,15,0.3)',
+  }));
+
+  // Main building — wider, lower
+  g.appendChild(svgEl('path', {
+    d: 'M -14 0 L 0 7 L 0 -10 L -14 -17 Z',
+    fill: '#7a6a5a', stroke: COLOR.ink, 'stroke-width': 0.8,
+  }));
+  g.appendChild(svgEl('path', {
+    d: 'M 14 0 L 0 7 L 0 -10 L 14 -17 Z',
+    fill: '#5a4e3e', stroke: COLOR.ink, 'stroke-width': 0.8,
+  }));
+  // Saw-tooth factory roof
+  g.appendChild(svgEl('path', {
+    d: 'M -14 -17 L -10 -19 L -6 -17 L -2 -19 L 2 -17 L 6 -19 L 10 -17 L 14 -17 L 0 -10 Z',
+    fill: '#3a3025', stroke: COLOR.ink, 'stroke-width': 0.7, 'stroke-linejoin': 'round',
+  }));
+
+  // Smokestacks
+  g.appendChild(svgEl('rect', { x: -5, y: -32, width: 3.5, height: 16, fill: '#5a4030', stroke: COLOR.ink, 'stroke-width': 0.6 }));
+  g.appendChild(svgEl('rect', { x: -5.5, y: -33, width: 4.5, height: 2, fill: '#3a2820', stroke: COLOR.ink, 'stroke-width': 0.6 }));
+  g.appendChild(svgEl('rect', { x: 4, y: -28, width: 3, height: 12, fill: '#5a4030', stroke: COLOR.ink, 'stroke-width': 0.6 }));
+
+  // Smoke (multiple soft puffs)
+  for (let i = 0; i < 4; i++) {
+    g.appendChild(svgEl('circle', {
+      cx: -3 + i * 2, cy: -38 - i * 5,
+      r: 4 + i * 1.2,
+      fill: 'rgba(180,170,160,0.55)',
+    }));
+  }
+  for (let i = 0; i < 3; i++) {
+    g.appendChild(svgEl('circle', {
+      cx: 6 + i * 1.5, cy: -32 - i * 4,
+      r: 3 + i,
+      fill: 'rgba(180,170,160,0.5)',
+    }));
+  }
+
+  // Windows (lit)
+  for (let i = 0; i < 3; i++) {
+    g.appendChild(svgEl('rect', { x: -10 + i*4, y: -8, width: 2, height: 2, fill: '#d8a040' }));
+  }
+
+  parent.appendChild(g);
+}
+
+// ============================================================
+// PEOPLE
+// ============================================================
+function renderPeople() {
+  const layer = document.getElementById('peopleLayer');
+  layer.innerHTML = '';
+  // Sort by depth so people in front render on top of those behind
+  const sorted = [...W.people].sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
+  for (const p of sorted) {
+    drawPerson(layer, p);
+  }
+}
+
+function drawPerson(parent, p) {
+  const screen = tileToScreen(p.tx + 0.5, p.ty + 0.5);
+  const g = svgEl('g', {
+    transform: `translate(${screen.sx},${screen.sy})`,
+    'data-id': p.id,
+    'data-alive': String(p.alive),
+    'data-armed': String(p.armed),
+    style: 'cursor:pointer',
+  });
+
+  // ===== FLED — remove from view entirely =====
+  if (p.fled) {
+    // Don't render — they've left the area
+    parent.appendChild(g);
+    return;
+  }
+
+  // ===== DEAD =====
+  if (!p.alive) {
+    // Body lying down
+    g.appendChild(svgEl('ellipse', {
+      cx: 0, cy: 1, rx: 5, ry: 1.6,
+      fill: 'rgba(40,30,15,0.5)',
+    }));
+    // Slightly elongated body silhouette in shirt color
+    g.appendChild(svgEl('ellipse', {
+      cx: 0, cy: 0, rx: 4.5, ry: 1.4,
+      fill: p.shirt,
+      stroke: COLOR.ink,
+      'stroke-width': 0.4,
+    }));
+    // Head (round)
+    g.appendChild(svgEl('circle', {
+      cx: -3.5, cy: -0.5, r: 1.4,
+      fill: p.skin,
+      stroke: COLOR.ink,
+      'stroke-width': 0.3,
+    }));
+    // Tiny dark mark indicating mortal
+    g.appendChild(svgEl('circle', {
+      cx: 0, cy: 0, r: 0.6,
+      fill: '#5a1010',
+    }));
+    g.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectPerson(p.id);
+    });
+    parent.appendChild(g);
+    return;
+  }
+
+  // ===== ALIVE =====
+  // Subtle shadow
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 1, rx: 2.5, ry: 1,
+    fill: 'rgba(40,30,15,0.4)',
+  }));
+
+  // Legs (subtle bobbing)
+  const bob = Math.sin((animTime * 0.005 + p.seed * 10)) * 0.5;
+  g.appendChild(svgEl('rect', {
+    x: -1.6, y: -1 + bob, width: 1.2, height: 3, fill: '#3a2818',
+  }));
+  g.appendChild(svgEl('rect', {
+    x: 0.4, y: -1 - bob, width: 1.2, height: 3, fill: '#3a2818',
+  }));
+
+  // Body (shirt)
+  g.appendChild(svgEl('path', {
+    d: 'M -2.4 -6 L 2.4 -6 L 2 -1 L -2 -1 Z',
+    fill: p.shirt,
+    stroke: COLOR.ink,
+    'stroke-width': 0.4,
+    'stroke-linejoin': 'round',
+  }));
+
+  // Sash / accent stripe
+  g.appendChild(svgEl('path', {
+    d: 'M -2.3 -4.5 L 2.3 -4.5 L 2.1 -3.5 L -2.1 -3.5 Z',
+    fill: p.accent,
+    opacity: 0.85,
+  }));
+
+  // GUN (visible if armed)
+  if (p.armed) {
+    g.appendChild(svgEl('path', {
+      d: 'M 2 -3.5 L 5 -4 L 5.2 -3.4 L 2.2 -2.9 Z',
+      fill: '#3a2818',
+      stroke: COLOR.ink,
+      'stroke-width': 0.3,
+    }));
+    g.appendChild(svgEl('rect', {
+      x: 4.4, y: -4.2, width: 0.4, height: 0.8, fill: '#1a1208',
+    }));
+  }
+
+  // Head (skin tone from ethnicity)
+  g.appendChild(svgEl('circle', {
+    cx: 0, cy: -8, r: 1.8,
+    fill: p.skin,
+    stroke: COLOR.ink,
+    'stroke-width': 0.4,
+  }));
+
+  // Hair / hat
+  const hatChoice = Math.floor(p.seed * 4);
+  if (p.role === 'soldier') {
+    g.appendChild(svgEl('path', {
+      d: 'M -2 -9 L 2 -9 L 1.5 -10 L -1.5 -10 Z',
+      fill: '#3a2818', stroke: COLOR.ink, 'stroke-width': 0.4,
+    }));
+  } else if (p.role === 'farmer' || p.role === 'fisher' || (p.ethnicity === 'yellow' && hatChoice < 2)) {
+    g.appendChild(svgEl('ellipse', {
+      cx: 0, cy: -9.5, rx: 3.2, ry: 0.8,
+      fill: '#c8a868', stroke: COLOR.ink, 'stroke-width': 0.4,
+    }));
+    g.appendChild(svgEl('ellipse', {
+      cx: 0, cy: -10, rx: 1.8, ry: 0.8,
+      fill: '#c8a868', stroke: COLOR.ink, 'stroke-width': 0.4,
+    }));
+  } else if ((p.ethnicity === 'purple' || p.ethnicity === 'maroon') && hatChoice < 2) {
+    g.appendChild(svgEl('path', {
+      d: 'M -2.4 -7.5 Q 0 -10.5 2.4 -7.5 Q 2.6 -8 2.5 -8.5 Q 0 -11.2 -2.5 -8.5 Q -2.6 -8 -2.4 -7.5 Z',
+      fill: p.accent,
+      stroke: COLOR.ink,
+      'stroke-width': 0.4,
+      'stroke-linejoin': 'round',
+    }));
+  } else {
+    g.appendChild(svgEl('path', {
+      d: 'M -1.9 -8.8 Q 0 -10.4 1.9 -8.8 Q 2 -8.2 1.5 -7.8 L -1.5 -7.8 Q -2 -8.2 -1.9 -8.8 Z',
+      fill: p.hair,
+      stroke: COLOR.ink,
+      'stroke-width': 0.35,
+    }));
+    if (p.ethnicity === 'violet' && p.seed > 0.5) {
+      g.appendChild(svgEl('circle', {
+        cx: 1.5, cy: -8.8, r: 0.6,
+        fill: p.accent,
+      }));
+    }
+  }
+
+  g.addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectPerson(p.id);
+  });
+
+  parent.appendChild(g);
+}
+
+// ============================================================
+// SPEECH BUBBLES — float above people who are arguing/fighting
+// ============================================================
+function renderBubbles() {
+  let layer = document.getElementById('bubbleLayer');
+  if (!layer) {
+    layer = svgEl('g', { id: 'bubbleLayer', 'pointer-events': 'none' });
+    document.getElementById('worldGroup').appendChild(layer);
+  }
+  layer.innerHTML = '';
+  for (const p of W.people) {
+    if (!p.bubble) continue;
+    const screen = tileToScreen(p.tx + 0.5, p.ty + 0.5);
+    const sym = p.bubble.symbol;
+    const isKill = sym === '✕';
+    const fill = isKill ? '#8a1a1a' : '#f4ead6';
+    const stroke = isKill ? '#5a0808' : '#2a1f15';
+    const txtColor = isKill ? '#f4ead6' : '#a82828';
+    // Bubble background
+    layer.appendChild(svgEl('ellipse', {
+      cx: screen.sx + 4, cy: screen.sy - 14,
+      rx: 5.5, ry: 4,
+      fill, stroke,
+      'stroke-width': 0.6,
+    }));
+    // Tail
+    layer.appendChild(svgEl('path', {
+      d: `M ${screen.sx + 1} ${screen.sy - 11} L ${screen.sx + 3} ${screen.sy - 9} L ${screen.sx + 4} ${screen.sy - 11} Z`,
+      fill, stroke,
+      'stroke-width': 0.4,
+    }));
+    // Symbol
+    const t = svgEl('text', {
+      x: screen.sx + 4, y: screen.sy - 12,
+      'text-anchor': 'middle',
+      'font-family': 'Palatino, serif',
+      'font-size': 6,
+      'font-weight': 700,
+      fill: txtColor,
+    });
+    t.textContent = sym;
+    layer.appendChild(t);
+  }
+}
+
+// ============================================================
+// PEOPLE MOVEMENT — POI-based scheduling
+// Each person is in one of two states:
+//   'idle'   — dwelling at currentPoi; counts down dwellTimer
+//   'moving' — walking along path toward currentPoi
+// When dwellTimer expires they pick a new destination from their
+// role schedule, find a path to it, and transition to 'moving'.
+// When they arrive, transition back to 'idle' with a new dwellTimer.
+// ============================================================
+let animTime = 0;
+
+function pickNextPOI(person) {
+  const sched = ROLE_SCHEDULES[person.role] || ROLE_SCHEDULES.farmer;
+  const pois = W.pois[person.place] || [];
+  // Weighted random pick
+  let totalWeight = 0;
+  const candidates = [];
+  for (const entry of sched) {
+    // Find all POIs of this kind
+    const matches = pois.filter(p => p.kind === entry.kind);
+    if (matches.length === 0) continue;
+    for (const m of matches) {
+      // For 'house', strongly prefer their own home so they actually go there
+      let w = entry.weight;
+      if (entry.kind === 'house' && m === person.home) w *= 4;
+      else if (entry.kind === 'house') w *= 0.2; // slim chance to wander into someone else's house space
+      candidates.push({ poi: m, weight: w, dwell: entry.dwell });
+      totalWeight += w;
+    }
+  }
+  if (candidates.length === 0) {
+    // Fallback: stay home
+    return { poi: person.home, dwell: [400, 800] };
+  }
+  let r = Math.random() * totalWeight;
+  for (const c of candidates) {
+    r -= c.weight;
+    if (r <= 0) return c;
+  }
+  return candidates[candidates.length - 1];
+}
+
+function buildPathTo(person, target) {
+  // Generate a few intermediate waypoints between current pos and target,
+  // each slightly perturbed so people don't all walk exactly the same line.
+  // Avoids walking through water tiles by routing around them.
+  const path = [];
+  const startX = person.tx, startY = person.ty;
+  const dx = target.tx - startX;
+  const dy = target.ty - startY;
+  const dist = Math.hypot(dx, dy);
+  const steps = Math.max(2, Math.ceil(dist * 1.2));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    let wx = startX + dx * t;
+    let wy = startY + dy * t;
+    // Small lateral perturbation (less near start/end)
+    const sway = Math.sin(t * Math.PI) * 0.25;
+    const perpX = -dy / (dist + 0.001);
+    const perpY = dx / (dist + 0.001);
+    wx += perpX * (Math.random() - 0.5) * sway;
+    wy += perpY * (Math.random() - 0.5) * sway;
+    // If the waypoint lands on water, nudge it
+    const tx = Math.floor(wx), ty = Math.floor(wy);
+    if (inBounds(tx, ty) && W.tiles[ty][tx] === T.WATER) {
+      // try perpendicular nudge
+      wx += perpX * 1.2;
+      wy += perpY * 1.2;
+    }
+    path.push({ tx: wx, ty: wy });
+  }
+  return path;
+}
+
+function tickPeople(dt) {
+  for (const p of W.people) {
+    // Dead people don't move
+    if (!p.alive) continue;
+    // Stunned people pause
+    if (p.stunnedUntil && GAME.ticks < p.stunnedUntil) continue;
+
+    if (p.state === 'idle') {
+      p.dwellTimer -= dt;
+      if (Math.random() < 0.02) {
+        p.tx += (Math.random() - 0.5) * 0.04;
+        p.ty += (Math.random() - 0.5) * 0.04;
+      }
+      if (p.dwellTimer <= 0) {
+        const choice = pickNextPOI(p);
+        p.currentPoi = choice.poi;
+        p.path = buildPathTo(p, choice.poi);
+        p.pathIdx = 0;
+        p.state = 'moving';
+        p.nextDwell = choice.dwell;
+      }
+    } else if (p.state === 'moving') {
+      if (p.pathIdx >= p.path.length) {
+        // If fleeing, this is when they exit the world
+        if (p.fleeing) {
+          p.fled = true;
+          p.alive = false;       // remove from active simulation
+          p.fledAt = GAME.ticks;
+          continue;
+        }
+        p.state = 'idle';
+        p.dwellTimer = p.nextDwell[0] + Math.random() * (p.nextDwell[1] - p.nextDwell[0]);
+        const offX = (Math.random() - 0.5) * 0.4;
+        const offY = (Math.random() - 0.5) * 0.4;
+        p.tx = p.currentPoi.tx + offX;
+        p.ty = p.currentPoi.ty + offY;
+      } else {
+        const wp = p.path[p.pathIdx];
+        const dx = wp.tx - p.tx;
+        const dy = wp.ty - p.ty;
+        const d = Math.hypot(dx, dy);
+        const speed = (p.fleeing ? 0.0050 : (p.role === 'child' ? 0.0040 : 0.0024)) * dt;
+        if (d < speed * 1.2) {
+          p.pathIdx += 1;
+        } else {
+          p.tx += (dx / d) * speed;
+          p.ty += (dy / d) * speed;
+          p.facing = dx > 0 ? 1 : -1;
+        }
+      }
+    }
+  }
+
+  // Fire encounter scan
+  tickEncounters(dt);
+
+  // Update DOM transforms for all people (including dead — they need to STAY where they fell)
+  const layer = document.getElementById('peopleLayer');
+  if (!layer.firstChild) {
+    renderPeople();
+    return;
+  }
+  if (!tickPeople._sortCounter) tickPeople._sortCounter = 0;
+  tickPeople._sortCounter++;
+  const groupsArr = Array.from(layer.children);
+  const map = {};
+  for (const g of groupsArr) map[g.getAttribute('data-id')] = g;
+  for (const p of W.people) {
+    const g = map[p.id];
+    if (!g) continue;
+    const screen = tileToScreen(p.tx + 0.5, p.ty + 0.5);
+    g.setAttribute('transform', `translate(${screen.sx},${screen.sy})`);
+    // If alive state changed since last render, update visual
+    const wasAlive = g.getAttribute('data-alive') === 'true';
+    const wasArmed = g.getAttribute('data-armed') === 'true';
+    if (wasAlive !== p.alive || wasArmed !== p.armed) {
+      // Remove the old element and add a new one
+      const fresh = rebuildPersonElement(p);
+      g.parentNode.replaceChild(fresh, g);
+      map[p.id] = fresh;
+    }
+  }
+  if (tickPeople._sortCounter % 30 === 0) {
+    const sorted = [...W.people].sort((a, b) => (a.tx + a.ty) - (b.tx + b.ty));
+    for (const p of sorted) {
+      const g = map[p.id];
+      if (g && g.parentNode === layer) layer.appendChild(g);
+    }
+  }
+}
+
+function rebuildPersonElement(p) {
+  // Create a fresh person SVG group based on current state
+  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  drawPerson(layer, p);
+  return layer.firstChild;
+}
+
+// ============================================================
+// SELECTION & INSPECTOR
+// ============================================================
+function selectPerson(id) {
+  const p = W.people.find(x => x.id === id);
+  if (!p) return;
+  W.selectedPerson = id;
+  const role = ROLES[p.role] || { label: p.role, desc: '' };
+  const ethLabel = ETHNIC_LABELS[p.ethnicity] || '';
+  document.getElementById('inspName').textContent = p.name + (p.alive ? '' : ' (deceased)');
+  document.getElementById('inspMeta').textContent = role.label + ' · ' + ethLabel + ' · ' + p.place;
+  let activity = '';
+  if (p.fled) {
+    activity = `Fled to safety. No longer in the region.`;
+  } else if (!p.alive) {
+    activity = `Killed in a dispute with a ${ETHNIC_LABELS[p.killedBy] || 'rival'} resident.`;
+  } else if (p.armed) {
+    activity = 'Armed.';
+  } else if (p.state === 'idle' && p.currentPoi) {
+    if (p.currentPoi === p.home) activity = 'Currently at home.';
+    else activity = 'Currently at ' + (p.currentPoi.label || 'a stop in town') + '.';
+  } else if (p.state === 'moving' && p.currentPoi) {
+    activity = 'On the way to ' + (p.currentPoi.label || 'somewhere') + '.';
+  }
+  // Trait readout (visible for now; later we can hide behind a "spy" mechanic)
+  const traits = `
+    <div style="margin-top:8px;font-size:11px;font-family:monospace;color:#5a4a35;">
+      ${traitBar('POL', p.politicalPassion)}
+      ${traitBar('VIO', p.violenceProclivity)}
+      ${traitBar('ETH', p.ethnicPassion)}
+      ${traitBar('ECO', p.economicInterest)}
+    </div>
+  `;
+  // Show local trauma against this person's group, if any
+  let traumaNote = '';
+  if (p.alive && !p.fled) {
+    const settlement = GAME.settlements.find(s => s.name === p.place);
+    if (settlement) {
+      const localTrauma = settlement.trauma[p.ethnicity] || 0;
+      if (localTrauma > 0.5) {
+        const armedDefenders = W.people.filter(o =>
+          o.alive && !o.fleeing && o.place === p.place && o.ethnicity === p.ethnicity && o.armed
+        ).length;
+        const armedSelf = p.armed ? 'They are armed.' : 'They have no weapon.';
+        const defenseText = armedDefenders >= 3
+          ? 'Their kin can defend them.'
+          : armedDefenders > 0
+            ? 'A few of their kin are armed, but help is uncertain.'
+            : 'Their kin have no defenders here.';
+        traumaNote = `<div style="margin-top:8px;padding:6px 8px;background:rgba(168,50,50,0.10);border-left:2px solid #a83232;font-size:11px;font-style:italic;color:#5a1a1a;">
+          ${ETHNIC_LABELS[p.ethnicity]} have been killed in ${p.place} recently. ${armedSelf} ${defenseText}
+        </div>`;
+      }
+    }
+  }
+  document.getElementById('inspDesc').innerHTML = `${role.desc}${activity ? ' <em>' + activity + '</em>' : ''}${p.alive && !p.fled ? traits : ''}${traumaNote}`;
+  document.getElementById('inspector').classList.add('open');
+}
+
+function traitBar(label, value) {
+  const pct = Math.round(value * 100);
+  return `
+    <div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
+      <span style="width:28px;letter-spacing:0.1em;">${label}</span>
+      <span style="flex:1;height:4px;background:#d8c890;position:relative;">
+        <span style="position:absolute;left:0;top:0;bottom:0;width:${pct}%;background:#7a4a2a;"></span>
+      </span>
+      <span style="width:24px;text-align:right;">${pct}</span>
+    </div>
+  `;
+}
+
+function closeInspector() {
+  document.getElementById('inspector').classList.remove('open');
+  W.selectedPerson = null;
+}
+
+// ============================================================
+// CAMERA — pan & zoom
+// ============================================================
+const camera = {
+  tx: 0, ty: 0,    // translation
+  scale: 1,
+  minScale: 0.5,
+  maxScale: 2.5,
+};
+
+function applyCamera() {
+  const g = document.getElementById('worldGroup');
+  g.setAttribute('transform', `translate(${camera.tx},${camera.ty}) scale(${camera.scale})`);
+}
+
+function resetView() {
+  // Center on the middle of the world
+  const svg = document.getElementById('worldSvg');
+  const sw = svg.clientWidth;
+  const sh = svg.clientHeight;
+  const b = worldBounds();
+  // Scale so world fits with margin
+  const scaleX = sw / (b.w + 100);
+  const scaleY = sh / (b.h + 100);
+  camera.scale = Math.min(scaleX, scaleY, 1.5);
+  // Center on center of world
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
+  camera.tx = sw / 2 - cx * camera.scale;
+  camera.ty = sh / 2 - cy * camera.scale;
+  applyCamera();
+}
+
+function zoomBy(factor) {
+  const svg = document.getElementById('worldSvg');
+  const cx = svg.clientWidth / 2;
+  const cy = svg.clientHeight / 2;
+  zoomAtPoint(factor, cx, cy);
+}
+
+function zoomAtPoint(factor, cx, cy) {
+  const newScale = Math.max(camera.minScale, Math.min(camera.maxScale, camera.scale * factor));
+  const k = newScale / camera.scale;
+  camera.tx = cx - k * (cx - camera.tx);
+  camera.ty = cy - k * (cy - camera.ty);
+  camera.scale = newScale;
+  applyCamera();
+}
+
+// Pan & zoom input
+const svg = document.getElementById('worldSvg');
+const pointers = new Map();
+let panStart = null;
+let pinchStart = null;
+let pointerMoved = false;
+let downPos = null;
+
+svg.addEventListener('pointerdown', (e) => {
+  svg.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  pointerMoved = false;
+  downPos = { x: e.clientX, y: e.clientY };
+  // Hide hint
+  const hint = document.getElementById('hint');
+  if (hint) hint.style.opacity = '0.4';
+  if (pointers.size === 1) {
+    panStart = { x: e.clientX, y: e.clientY, tx: camera.tx, ty: camera.ty };
+    svg.classList.add('dragging');
+  } else if (pointers.size === 2) {
+    const pts = [...pointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    const rect = svg.getBoundingClientRect();
+    pinchStart = {
+      dist: Math.hypot(dx, dy),
+      scale: camera.scale,
+      midX: (pts[0].x + pts[1].x)/2 - rect.left,
+      midY: (pts[0].y + pts[1].y)/2 - rect.top,
+      tx: camera.tx,
+      ty: camera.ty,
+    };
+    panStart = null;
+  }
+});
+svg.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (downPos) {
+    const dx = e.clientX - downPos.x;
+    const dy = e.clientY - downPos.y;
+    if (Math.hypot(dx, dy) > 6) pointerMoved = true;
+  }
+  if (pointers.size === 1 && panStart) {
+    const p = [...pointers.values()][0];
+    camera.tx = panStart.tx + (p.x - panStart.x);
+    camera.ty = panStart.ty + (p.y - panStart.y);
+    applyCamera();
+  } else if (pointers.size === 2 && pinchStart) {
+    const pts = [...pointers.values()];
+    const dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    const dist = Math.hypot(dx, dy);
+    const newScale = Math.max(camera.minScale, Math.min(camera.maxScale,
+      pinchStart.scale * (dist / pinchStart.dist)));
+    const k = newScale / pinchStart.scale;
+    camera.scale = newScale;
+    camera.tx = pinchStart.midX - k * (pinchStart.midX - pinchStart.tx);
+    camera.ty = pinchStart.midY - k * (pinchStart.midY - pinchStart.ty);
+    applyCamera();
+  }
+});
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size === 0) {
+    svg.classList.remove('dragging');
+    panStart = null;
+    pinchStart = null;
+  } else if (pointers.size === 1) {
+    const p = [...pointers.values()][0];
+    panStart = { x: p.x, y: p.y, tx: camera.tx, ty: camera.ty };
+    pinchStart = null;
+  }
+}
+svg.addEventListener('pointerup', endPointer);
+svg.addEventListener('pointercancel', endPointer);
+svg.addEventListener('pointerleave', endPointer);
+
+svg.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = svg.getBoundingClientRect();
+  const factor = e.deltaY < 0 ? 1.12 : 0.89;
+  zoomAtPoint(factor, e.clientX - rect.left, e.clientY - rect.top);
+}, { passive: false });
+
+// Click on empty area closes inspector OR fires airstrike if armed
+svg.addEventListener('click', (e) => {
+  if (pointerMoved) return;
+  // Airstrike mode: convert click to world tile and fire
+  if (GAME.airstrikeArmed) {
+    const rect = svg.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    // Reverse pan/zoom to get world coords, then unproject from iso to tile coords
+    const worldX = (screenX - camera.tx) / camera.scale;
+    const worldY = (screenY - camera.ty) / camera.scale;
+    // Inverse iso projection: tx = worldX/(W/2) + worldY/(H/2)) / 2; ty = ...
+    // From tileToScreen: sx = (tx - ty) * W/2; sy = (tx + ty) * H/2
+    // Solve: tx = sx/(W/2)/2 + sy/(H/2)/2; ty = sy/(H/2)/2 - sx/(W/2)/2
+    const tx = (worldX / (TILE_W/2) + worldY / (TILE_H/2)) / 2;
+    const ty = (worldY / (TILE_H/2) - worldX / (TILE_W/2)) / 2;
+    executeAirstrike(tx, ty);
+    return;
+  }
+  closeInspector();
+});
+
+// ============================================================
+// ANIMATION LOOP
+// ============================================================
+function loop(t) {
+  const dt = animTime ? Math.min(50, t - animTime) : 16;
+  animTime = t;
+  tickPeople(dt);
+  tickRed(dt);
+  tickEconomy(dt);
+  tickDemographics(dt);
+  tickStability(dt);
+  if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
+    renderEthnicZones();
+  }
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// GUN SHIPPING — the player's main lever
+// ============================================================
+const SHIPMENT_COST = 25;
+const GUNS_PER_SHIPMENT = 6;
+
+function shipGuns(ethnicity) {
+  if (GAME.ended) return;
+  if (GAME.playerMoney < SHIPMENT_COST) {
+    addFeed('Insufficient funds for shipment.', 'death-event');
+    return;
+  }
+  GAME.playerMoney -= SHIPMENT_COST;
+  GAME.playerGunsShipped[ethnicity] = (GAME.playerGunsShipped[ethnicity] || 0) + GUNS_PER_SHIPMENT;
+  // Update favored faction — whoever the player has armed most
+  let topEth = null, topCount = 0;
+  for (const [e, c] of Object.entries(GAME.playerGunsShipped)) {
+    if (c > topCount) { topCount = c; topEth = e; }
+  }
+  GAME.favoredEth = topEth;
+  // Distribute guns among living adults of that ethnicity
+  distributeGuns(ethnicity, GUNS_PER_SHIPMENT);
+  addFeed(`You ship ${GUNS_PER_SHIPMENT} rifles to the ${ETHNIC_LABELS[ethnicity]} community.`, 'player-event');
+  for (const p of W.people) {
+    if (p.alive && p.ethnicity === ethnicity) {
+      p.ethnicPassion = clamp01(p.ethnicPassion + 0.04);
+    }
+  }
+  updateHUD();
+  redConsiderResponse();
+}
+
+function distributeGuns(ethnicity, count) {
+  // Pick weighted-random from living adult members of that ethnicity.
+  // Prefer those with higher violence proclivity and ethnic passion.
+  const candidates = W.people.filter(p =>
+    p.alive && !p.armed && p.ethnicity === ethnicity && p.role !== 'child'
+  );
+  if (candidates.length === 0) return;
+  // Score each candidate
+  const scored = candidates.map(p => ({
+    p,
+    score: p.violenceProclivity * 0.5 + p.ethnicPassion * 0.4 + Math.random() * 0.3
+  })).sort((a, b) => b.score - a.score);
+  for (let i = 0; i < Math.min(count, scored.length); i++) {
+    scored[i].p.armed = true;
+    // Receiving a gun raises violence proclivity slightly
+    scored[i].p.violenceProclivity = clamp01(scored[i].p.violenceProclivity + 0.05);
+  }
+}
+
+// ============================================================
+// RED AI — reacts to player's actions
+// ============================================================
+function redConsiderResponse() {
+  // Red waits a bit, then arms a rival faction.
+  // 60% chance per shipment that Red responds within ~3-8 seconds.
+  if (Math.random() < 0.6) {
+    const playerArmed = Object.entries(GAME.playerGunsShipped)
+      .sort((a, b) => b[1] - a[1])[0];
+    if (!playerArmed) return;
+    const playerEth = playerArmed[0];
+    let target = ETHNIC_RIVALS[playerEth] || 'maroon';
+    // Don't pick same target the player chose
+    if (target === playerEth) target = 'yellow';
+    // Schedule
+    GAME.redCooldown = 3000 + Math.random() * 5000;
+    GAME.redLastTargetEth = target;
+  }
+}
+
+function tickRed(dt) {
+  if (GAME.ended) return;
+  if (GAME.redCooldown > 0) {
+    GAME.redCooldown -= dt;
+    if (GAME.redCooldown <= 0 && GAME.redLastTargetEth && GAME.redMoney >= SHIPMENT_COST) {
+      // Red ships guns
+      const eth = GAME.redLastTargetEth;
+      GAME.redMoney -= SHIPMENT_COST;
+      GAME.redGunsShipped[eth] = (GAME.redGunsShipped[eth] || 0) + GUNS_PER_SHIPMENT;
+      distributeGuns(eth, GUNS_PER_SHIPMENT);
+      // Inflame their ethnic passion
+      for (const p of W.people) {
+        if (p.alive && p.ethnicity === eth) {
+          p.ethnicPassion = clamp01(p.ethnicPassion + 0.04);
+        }
+      }
+      addFeed(`Reuters reports Soviet weapons reaching ${ETHNIC_LABELS[eth]} factions.`, 'red-event');
+      GAME.redLastTargetEth = null;
+    }
+  }
+}
+
+// ============================================================
+// AIRSTRIKE (Target 1 — the trap)
+// When the player clicks the airstrike button, the world enters
+// "targeting mode" — the next tap on the map calls in a strike.
+// The strike kills everyone in a radius, scorches tiles, ruins buildings,
+// and creates a permanent scar. It costs $100.
+// ============================================================
+function renderAirstrikeButton() {
+  const panel = document.getElementById('airstrikePanel');
+  if (!panel) return;
+  if (!AIRSTRIKE_AVAILABILITY.unlocked) {
+    panel.innerHTML = '';
+    return;
+  }
+  const armed = GAME.airstrikeArmed ? 'armed' : '';
+  const broke = GAME.playerMoney < AIRSTRIKE_COST;
+  panel.innerHTML = `
+    <button class="airstrike-btn ${armed}" onclick="toggleAirstrikeArmed()" ${broke && !GAME.airstrikeArmed ? 'disabled' : ''}>
+      ${GAME.airstrikeArmed ? 'CANCEL — TAP MAP TO STRIKE' : '◈ CALL AIRSTRIKE'}
+    </button>
+    <div class="airstrike-hint">
+      ${GAME.airstrikeArmed
+        ? 'Select a target on the map.'
+        : `Cost: $${AIRSTRIKE_COST}. Restores battlefield momentum.`}
+    </div>
+  `;
+}
+
+function toggleAirstrikeArmed() {
+  if (!AIRSTRIKE_AVAILABILITY.unlocked) return;
+  if (GAME.airstrikeArmed) {
+    GAME.airstrikeArmed = false;
+  } else {
+    if (GAME.playerMoney < AIRSTRIKE_COST) return;
+    GAME.airstrikeArmed = true;
+  }
+  renderAirstrikeButton();
+  updateMapCursor();
+}
+
+function updateMapCursor() {
+  const svg = document.getElementById('worldSvg');
+  if (GAME.airstrikeArmed) {
+    svg.style.cursor = 'crosshair';
+  } else {
+    svg.style.cursor = '';
+  }
+}
+
+function executeAirstrike(tx, ty) {
+  if (!GAME.airstrikeArmed) return;
+  if (GAME.playerMoney < AIRSTRIKE_COST) return;
+  GAME.playerMoney -= AIRSTRIKE_COST;
+  GAME.airstrikesUsed++;
+  GAME.airstrikeArmed = false;
+  GAME.recentViolence += 30; // brief stability dip
+
+  // Damage area
+  const radius = AIRSTRIKE_RADIUS;
+  const tileMin = Math.floor(tx - radius - 1);
+  const tileMax = Math.ceil(tx + radius + 1);
+  const yMin = Math.floor(ty - radius - 1);
+  const yMax = Math.ceil(ty + radius + 1);
+
+  // Scorch tiles within radius
+  for (let y = yMin; y <= yMax; y++) {
+    for (let x = tileMin; x <= tileMax; x++) {
+      if (!inBounds(x, y)) continue;
+      const d = Math.hypot(x + 0.5 - tx, y + 0.5 - ty);
+      if (d > radius) continue;
+      const cur = W.tiles[y][x];
+      if (cur === T.WATER) continue; // water doesn't burn
+      // Heart of strike → rubble; outer → ash
+      W.tiles[y][x] = d < radius * 0.6 ? T.RUBBLE : T.ASH;
+    }
+  }
+
+  // Damage buildings — mark trees as burned, mark settlements as destroyed
+  // if their center is in radius
+  for (const f of W.features) {
+    const d = Math.hypot(f.tx - tx, f.ty - ty);
+    if (d > radius) continue;
+    if (f.type === 'tree') f.burned = true;
+    if (f.type === 'village' || f.type === 'city') {
+      // Find the matching settlement
+      const s = GAME.settlements.find(x => x.name === f.name);
+      if (s && !s.destroyed && d < radius * 1.2) {
+        s.destroyed = true;
+        f.destroyed = true;
+        GAME.villagesDestroyed++;
+        addFeed(`${f.name} has been destroyed by airstrike.`, 'strike-event');
+        _territoryVersion++; // force territory map rebuild
+      }
+    }
+  }
+
+  // Kill all people within radius (and a bit beyond)
+  let killed = 0;
+  for (const p of W.people) {
+    if (!p.alive || p.fled) continue;
+    const d = Math.hypot(p.tx - tx, p.ty - ty);
+    if (d > radius * 1.1) continue;
+    // Direct hit
+    p.alive = false;
+    p.deathTime = GAME.ticks;
+    p.killedBy = 'airstrike';
+    killed++;
+    GAME.deaths++;
+  }
+  addFeed(`◈ Airstrike called — ${killed} killed.`, 'strike-event');
+
+  // Survivors near the strike: trauma & flight
+  for (const p of W.people) {
+    if (!p.alive || p.fled) continue;
+    const d = Math.hypot(p.tx - tx, p.ty - ty);
+    if (d > radius * 3) continue;
+    const settlement = GAME.settlements.find(s => s.name === p.place);
+    if (settlement) {
+      settlement.trauma[p.ethnicity] = (settlement.trauma[p.ethnicity] || 0) + 1.5;
+    }
+    // Some survivors flee immediately
+    if (Math.random() < 0.5 && p.role !== 'soldier') {
+      const s = GAME.settlements.find(s => s.name === p.place) || { tx, ty };
+      beginFlight(p, s);
+    }
+  }
+
+  // Re-render the strike zone
+  renderTilesAfterStrike();
+  renderWorldFeatures();
+  renderEthnicZones();
+  updateHUD();
+  updateMapCursor();
+  renderAirstrikeButton();
+
+  // Check end conditions
+  checkEndGame();
+}
+
+// Re-render specific tile layers after a strike
+function renderTilesAfterStrike() {
+  const terrainLayer = document.getElementById('terrainLayer');
+  const riverLayer = document.getElementById('riverLayer');
+  if (!terrainLayer || !riverLayer) return;
+  terrainLayer.innerHTML = '';
+  riverLayer.innerHTML = '';
+  for (let y = 0; y < WORLD_H; y++) {
+    for (let x = 0; x < WORLD_W; x++) {
+      const tile = W.tiles[y][x];
+      const target = (tile === T.WATER) ? riverLayer : terrainLayer;
+      drawTile(target, x, y, tile);
+    }
+  }
+}
+
+// Re-render building layer (buildings can be destroyed)
+function renderWorldFeatures() {
+  const buildingLayer = document.getElementById('buildingLayer');
+  const forestLayer = document.getElementById('forestLayer');
+  if (!buildingLayer || !forestLayer) return;
+  buildingLayer.innerHTML = '';
+  forestLayer.innerHTML = '';
+  const sortable = [...W.features.map(f => ({ ...f, _depth: f.tx + f.ty }))];
+  sortable.sort((a, b) => a._depth - b._depth);
+  for (const f of sortable) {
+    if (f.type === 'tree') drawTree(forestLayer, f.tx, f.ty, f.burned);
+    else if (f.type === 'village') drawVillage(buildingLayer, f);
+    else if (f.type === 'city') drawCity(buildingLayer, f);
+  }
+}
+// ============================================================
+// FEED & HUD
+// ============================================================
+function addFeed(text, cls) {
+  const feed = document.getElementById('hudFeed');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = '› ' + text;
+  feed.insertBefore(line, feed.firstChild);
+  // Limit feed length
+  while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+}
+
+function updateHUD() {
+  document.getElementById('hudMoney').textContent = '$' + GAME.playerMoney;
+  document.getElementById('hudDeaths').textContent = '☠ ' + GAME.deaths;
+  // Stability bar — display the lying number
+  const stabRound = Math.round(GAME.stability);
+  const stabEl = document.getElementById('hudStabilityValue');
+  if (stabEl) stabEl.textContent = stabRound;
+  const fill = document.getElementById('hudStabilityFill');
+  if (fill) fill.style.width = stabRound + '%';
+  // Disable shipping buttons if broke
+  document.querySelectorAll('.hud-btn').forEach(b => {
+    b.disabled = GAME.playerMoney < SHIPMENT_COST || GAME.ended;
+  });
+  // Re-render airstrike button (state may have changed)
+  renderAirstrikeButton();
+}
+
+// Add money over time so the player can keep playing
+function tickEconomy(dt) {
+  if (!tickEconomy._t) tickEconomy._t = 0;
+  tickEconomy._t += dt;
+  if (tickEconomy._t > 8000) {
+    tickEconomy._t = 0;
+    if (!GAME.ended) {
+      GAME.playerMoney += 25;
+      GAME.redMoney += 25;
+      updateHUD();
+    }
+  }
+}
+
+// ============================================================
+// ENDGAME
+// ============================================================
+function showEndgame() {
+  const winnerLabel = ETHNIC_LABELS[GAME.winner] || '—';
+  const playerShipped = Object.values(GAME.playerGunsShipped).reduce((a,b)=>a+b, 0);
+  const redShipped = Object.values(GAME.redGunsShipped).reduce((a,b)=>a+b, 0);
+  const stillPresent = new Set(W.people.filter(p => p.alive && !p.fled && p.role !== 'child').map(p => p.ethnicity));
+  const eliminated = ETHNICITIES.filter(e => !stillPresent.has(e));
+  const totalKilled = GAME.deaths;
+  const totalFled = W.people.filter(p => p.fled).length;
+  const finalStability = Math.round(GAME.stability);
+
+  // Set the title and subhead based on the player's "favored" ethnicity
+  // and whether it survived. The cable always reads as a success — that's
+  // the lie at the heart of the game.
+  const favored = GAME.favoredEth;
+  const wonForUs = favored && stillPresent.has(favored);
+
+  document.getElementById('endgameTitle').textContent = wonForUs
+    ? 'MISSION ACCOMPLISHED'
+    : 'OBJECTIVE COMPLETE';
+  document.getElementById('endgameSubhead').textContent = wonForUs
+    ? `${winnerLabel.toUpperCase()} CONSOLIDATION CONFIRMED · STABILITY ${finalStability}%`
+    : `REGIONAL STABILITY ACHIEVED · ${finalStability}%`;
+
+  // The cable body — sterile bureaucratic prose
+  const bodyLines = [];
+  bodyLines.push(`The ${winnerLabel} have emerged as the dominant political force in East Pantostan. The enemy presence has been neutralized. The map is secure.`);
+  bodyLines.push('');
+  if (eliminated.length > 0) {
+    const elimNames = eliminated.map(e => ETHNIC_LABELS[e]).join(', ');
+    bodyLines.push(`Resistance from ${elimNames} ${eliminated.length === 1 ? 'has' : 'have'} been resolved through population displacement and direct kinetic action. Reconstruction estimates pending.`);
+    bodyLines.push('');
+  }
+  if (GAME.airstrikesUsed > 0) {
+    bodyLines.push(`Air assets contributed materially to the operation. Collateral damage assessment is within acceptable thresholds for a theater of this complexity.`);
+    bodyLines.push('');
+  }
+  bodyLines.push(`Recommend continued monitoring of the region to ensure the security architecture established by these operations remains stable. We assess the local situation as broadly favorable to U.S. interests.`);
+
+  document.getElementById('endgameBody').innerHTML = bodyLines.join('<br>');
+
+  // Metrics
+  const metrics = [
+    ['WEAPONS SHIPPED (US)',     playerShipped],
+    ['WEAPONS SHIPPED (SOVIET)', redShipped],
+    ['CIVILIAN CASUALTIES',      totalKilled],
+    ['DISPLACED PERSONS',        totalFled],
+    ['SETTLEMENTS DESTROYED',    GAME.villagesDestroyed],
+    ['AIRSTRIKES AUTHORIZED',    GAME.airstrikesUsed],
+    ['FINAL STABILITY INDEX',    finalStability + '%'],
+  ];
+  const metricsEl = document.getElementById('endgameMetrics');
+  metricsEl.innerHTML = metrics.map(([k, v]) =>
+    `<div class="metric-row"><span class="label">${k}</span><span class="value">${v}</span></div>`
+  ).join('');
+
+  document.getElementById('endgameSplash').style.display = 'flex';
+  document.getElementById('hud').style.display = 'none';
+}
+function init() {
+  // Set initial SVG viewBox to a sane default; camera will translate
+  const svg = document.getElementById('worldSvg');
+  // Use clientWidth / clientHeight to set viewBox
+  const sw = svg.clientWidth || 400;
+  const sh = svg.clientHeight || 600;
+  svg.setAttribute('viewBox', `0 0 ${sw} ${sh}`);
+
+  generateWorld();
+  renderWorld();
+  resetView();
+  // Compute initial demographics so heartland zones show on turn 1
+  demoTickAccumulator = 9999;
+  tickDemographics(0);
+  updateHUD();
+  addFeed('You arrive in East Pantostan. Your superiors expect results.', 'player-event');
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', () => {
+  const svg = document.getElementById('worldSvg');
+  svg.setAttribute('viewBox', `0 0 ${svg.clientWidth} ${svg.clientHeight}`);
+});
+
+// Wait for layout
+requestAnimationFrame(() => requestAnimationFrame(init));
+</script>
+
+</body>
+</html>
