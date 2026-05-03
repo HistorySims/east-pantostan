@@ -1298,8 +1298,10 @@ function adjustRelation(a, b, delta) {
 }
 
 // Picks the ethnicity most hostile toward `eth`, used by Red AI targeting.
+// Returns null if no ethnicity has a meaningfully hostile relation — caller
+// supplies its own fallback rather than getting "least friendly ally".
 function mostHostileTo(eth) {
-  let target = null, lowest = Infinity;
+  let target = null, lowest = 0.05;
   for (const e of ETHNICITIES) {
     if (e === eth) continue;
     const r = relation(eth, e);
@@ -1404,6 +1406,8 @@ function tryEncounter(a, b) {
   tension -= (a.economicInterest + b.economicInterest) * 0.10;
   // Random nudge
   tension += (Math.random() - 0.5) * 0.3;
+  // Raiders are aggro on arrival — proximity encounters skew toward violence.
+  if (a.raiding || b.raiding) tension += 0.3;
 
   GAME.encounters++;
 
@@ -1476,6 +1480,18 @@ function killPerson(victim, killer) {
       const g = settlement.grievance[victim.ethnicity];
       g[killer.ethnicity] = (g[killer.ethnicity] || 0) + 1.0;
       adjustRelation(victim.ethnicity, killer.ethnicity, -0.04);
+      // News travels: settlements where the victim's people live also feel
+      // (a smaller share of) the grievance, scaled by distance from the killing.
+      // Without this, homogeneous settlements never accumulate cause to retaliate
+      // for kin killed elsewhere.
+      for (const other of GAME.settlements) {
+        if (other === settlement || other.destroyed) continue;
+        if ((other.composition[victim.ethnicity] || 0) < 0.05) continue;
+        const d = Math.hypot(other.tx - settlement.tx, other.ty - settlement.ty);
+        const share = 0.30 * Math.exp(-d / 18);
+        const og = other.grievance[victim.ethnicity];
+        og[killer.ethnicity] = (og[killer.ethnicity] || 0) + share;
+      }
     } else {
       // Intra-ethnic or unknown — still raises tension, but less so
       settlement.trauma[victim.ethnicity] = (settlement.trauma[victim.ethnicity] || 0) + 0.3;
@@ -1730,13 +1746,13 @@ function beginFlight(p, fromSettlement) {
 // march together, burn houses, fight defenders who engage, then walk home.
 // Each raid raises the target's counter-grievance — so raids beget raids.
 // ============================================================
-const RAID_GRIEVANCE_THRESHOLD = 2.0;
+const RAID_GRIEVANCE_THRESHOLD = 1.0;
 const RAID_PARTY_MIN = 3;
 const RAID_PARTY_MAX = 5;
-const RAID_RANGE = 12;            // tiles
+const RAID_RANGE = 18;            // tiles
 const RAID_COOLDOWN_MS = 30000;
 const RAID_ATTACK_DURATION = 25000;
-const RAID_GRIEVANCE_DECAY = 0.975; // per demographic tick (~2s)
+const RAID_GRIEVANCE_DECAY = 0.99;  // per raid tick (~1.5s); half-life ~100s
 
 let raidTickAccumulator = 0;
 function tickRaids(dt) {
@@ -1800,10 +1816,13 @@ function tickRaids(dt) {
 }
 
 function findRaidTarget(fromS, enemyEth) {
+  // Any settlement where the perpetrator ethnicity is at least 30% qualifies.
+  // Requiring full dominance (60% control threshold) excluded mixed settlements
+  // that the raiders would absolutely consider enemy ground.
   let best = null, bestD = Infinity;
   for (const t of GAME.settlements) {
     if (t === fromS || t.destroyed) continue;
-    if (t.dominant !== enemyEth) continue;
+    if ((t.composition[enemyEth] || 0) < 0.30) continue;
     const d = Math.hypot(t.tx - fromS.tx, t.ty - fromS.ty);
     if (d > RAID_RANGE) continue;
     if (d < bestD) { bestD = d; best = t; }
@@ -1863,6 +1882,16 @@ function sendRaiderTo(p, settlement, jitter) {
 function updateRaid(raid, dt) {
   const fromS = GAME.settlements.find(s => s.name === raid.fromName);
   const toS = GAME.settlements.find(s => s.name === raid.toName);
+  // Target razed (likely by an earlier raid) or source vanished — abort cleanly
+  // so we don't dereference null .tx/.radius below.
+  if (!fromS || !toS || toS.destroyed) {
+    for (const id of raid.participants) {
+      const p = W.people.find(p => p.id === id);
+      if (p) { p.raiding = false; p.raidId = null; }
+    }
+    GAME.raids = GAME.raids.filter(r => r !== raid);
+    return;
+  }
   const party = raid.participants
     .map(id => W.people.find(p => p.id === id))
     .filter(p => p && p.alive);
@@ -1884,6 +1913,11 @@ function updateRaid(raid, dt) {
       raid.state = 'attacking';
       raid.attackUntil = GAME.ticks + RAID_ATTACK_DURATION;
       raid.nextBurnAt = GAME.ticks + 1200;
+      // Cap damage per raid: burn at most ~40% of slots so a single raid is a
+      // setback, not annihilation. Total destruction now requires multiple raids.
+      const slotCount = toS.isCity ? 7 : 4;
+      raid.burnBudget = Math.max(1, Math.ceil(slotCount * 0.4));
+      raid.burnsDone = 0;
       addFeed(`Raiders reach ${toS.name}.`, 'red-event');
     } else {
       // Anyone who's gone idle gets re-routed toward the target.
@@ -1892,8 +1926,8 @@ function updateRaid(raid, dt) {
       }
     }
   } else if (raid.state === 'attacking') {
-    // Periodically burn an unburned slot.
-    if (GAME.ticks > raid.nextBurnAt) {
+    // Periodically burn an unburned slot, up to this raid's budget.
+    if (GAME.ticks > raid.nextBurnAt && raid.burnsDone < raid.burnBudget) {
       const slotCount = toS.isCity ? 7 : 4;
       const unburned = [];
       for (let i = 0; i < slotCount; i++) {
@@ -1902,8 +1936,9 @@ function updateRaid(raid, dt) {
       if (unburned.length > 0) {
         const slot = unburned[Math.floor(Math.random() * unburned.length)];
         toS.burnedSlots.push(slot);
+        raid.burnsDone++;
         GAME.recentViolence += 3;
-        renderWorldFeatures();
+        renderBuildings();
         addFeed(`Raiders torch a building in ${toS.name}.`, 'strike-event');
       }
       raid.nextBurnAt = GAME.ticks + 1500 + Math.random() * 1500;
@@ -3581,6 +3616,22 @@ function renderWorldFeatures() {
     if (f.type === 'tree') drawTree(forestLayer, f.tx, f.ty, f.burned);
     else if (f.type === 'village') drawVillage(buildingLayer, f);
     else if (f.type === 'city') drawCity(buildingLayer, f);
+  }
+}
+
+// Lightweight building-only redraw — used when raiders burn houses every
+// 1.5-3s, where rebuilding the forest layer is wasted work.
+function renderBuildings() {
+  const buildingLayer = document.getElementById('buildingLayer');
+  if (!buildingLayer) return;
+  buildingLayer.innerHTML = '';
+  const sortable = W.features
+    .filter(f => f.type === 'village' || f.type === 'city')
+    .map(f => ({ ...f, _depth: f.tx + f.ty }))
+    .sort((a, b) => a._depth - b._depth);
+  for (const f of sortable) {
+    if (f.type === 'village') drawVillage(buildingLayer, f);
+    else drawCity(buildingLayer, f);
   }
 }
 // ============================================================
