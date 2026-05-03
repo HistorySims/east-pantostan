@@ -809,6 +809,11 @@ function generateWorld() {
       // Goes up when a member of that ethnicity is killed here.
       // Decays slowly over time. Drives ethnic flight.
       trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
+      // Grievance[victimEth][perpEth]: identified-perpetrator counter,
+      // drives raids when the victim group has armed members nearby.
+      grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
+      // Slot indices (within drawCity/drawVillage) of houses burned by raiders.
+      burnedSlots: [],
     });
   }
   for (const v of villages) {
@@ -823,6 +828,8 @@ function generateWorld() {
       pulseUntil: 0,
       destroyed: false,
       trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
+      grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
+      burnedSlots: [],
     });
   }
 
@@ -1244,6 +1251,10 @@ const GAME = {
   airstrikesUsed: 0,
   villagesDestroyed: 0,
   refugeesCreated: 0,
+  // Active raid parties (see RAID SYSTEM section)
+  raids: [],
+  raidCooldowns: {},  // settlementName -> GAME.ticks at which next raid is allowed
+  raidsLaunched: 0,
 };
 
 // Threshold at which a settlement is considered "controlled" by an ethnicity.
@@ -1261,15 +1272,69 @@ const AIRSTRIKE_AVAILABILITY = {
   unlocked: false,                  // becomes true once conditions are met
 };
 
-// Ethnicities considered "rivals" for Red's reactive AI logic.
-// Picks a faction historically opposed to whoever the player armed.
-const ETHNIC_RIVALS = {
-  purple: 'violet',
-  violet: 'purple',
-  indigo: 'maroon',
-  maroon: 'indigo',
-  yellow: 'purple', // default rival for the non-aligned
+// Pairwise ethnic relations, in [-1, +1]. Negative = hostile, positive = allied.
+// Two seeded blocs (purple+indigo, violet+maroon) opposed across the matrix;
+// yellow floats with mild distrust of everyone. Live values drift over time
+// from cross-ethnic violence, shared-enemy effects, and a slow regression
+// toward these seed values (so peace eventually returns).
+const RELATIONS_SEED = {
+  purple: { violet: -0.6, indigo: +0.4, maroon: -0.3, yellow: -0.1 },
+  violet: { purple: -0.6, indigo: -0.3, maroon: +0.4, yellow: -0.1 },
+  indigo: { purple: +0.4, violet: -0.3, maroon: -0.6, yellow: -0.1 },
+  maroon: { purple: -0.3, violet: +0.4, indigo: -0.6, yellow: -0.1 },
+  yellow: { purple: -0.1, violet: -0.1, indigo: -0.1, maroon: -0.1 },
 };
+const RELATIONS = JSON.parse(JSON.stringify(RELATIONS_SEED));
+
+function relation(a, b) {
+  if (a === b) return 1;
+  return (RELATIONS[a] && RELATIONS[a][b]) || 0;
+}
+
+function adjustRelation(a, b, delta) {
+  if (a === b) return;
+  RELATIONS[a][b] = Math.max(-1, Math.min(1, RELATIONS[a][b] + delta));
+  RELATIONS[b][a] = Math.max(-1, Math.min(1, RELATIONS[b][a] + delta));
+}
+
+// Picks the ethnicity most hostile toward `eth`, used by Red AI targeting.
+function mostHostileTo(eth) {
+  let target = null, lowest = Infinity;
+  for (const e of ETHNICITIES) {
+    if (e === eth) continue;
+    const r = relation(eth, e);
+    if (r < lowest) { lowest = r; target = e; }
+  }
+  return target;
+}
+
+let relationsTickAccumulator = 0;
+function tickRelations(dt) {
+  if (GAME.ended) return;
+  relationsTickAccumulator += dt;
+  if (relationsTickAccumulator < 2000) return;
+  relationsTickAccumulator = 0;
+  // Slow regression toward seed values — events fade.
+  for (const a of ETHNICITIES) {
+    for (const b of ETHNICITIES) {
+      if (a === b) continue;
+      const target = RELATIONS_SEED[a][b];
+      RELATIONS[a][b] += (target - RELATIONS[a][b]) * 0.02;
+    }
+  }
+  // Common-enemy effect: pairs that both hate the same third party drift closer.
+  for (let i = 0; i < ETHNICITIES.length; i++) {
+    for (let j = i + 1; j < ETHNICITIES.length; j++) {
+      const a = ETHNICITIES[i], b = ETHNICITIES[j];
+      let pull = 0;
+      for (const c of ETHNICITIES) {
+        if (c === a || c === b) continue;
+        if (RELATIONS[a][c] < -0.3 && RELATIONS[b][c] < -0.3) pull += 0.005;
+      }
+      if (pull > 0) adjustRelation(a, b, pull);
+    }
+  }
+}
 
 // ============================================================
 // ENCOUNTER SYSTEM
@@ -1296,8 +1361,9 @@ function tickEncounters(dt) {
     for (let j = i + 1; j < live.length; j++) {
       const b = live[j];
       if (b.encounterCooldown > 0) continue;
-      // Same place only — strangers from different towns rarely meet
-      if (a.place !== b.place) continue;
+      // Same place only — strangers from different towns rarely meet,
+      // unless one of them is a raider (then physical proximity is enough).
+      if (a.place !== b.place && !a.raiding && !b.raiding) continue;
       const dx = a.tx - b.tx, dy = a.ty - b.ty;
       const d = Math.hypot(dx, dy);
       if (d > 1.0) continue;  // proximity threshold
@@ -1323,9 +1389,13 @@ function tryEncounter(a, b) {
   // Compute tension level (0 to ~2)
   let tension = 0;
   const sameEth = a.ethnicity === b.ethnicity;
-  // Cross-ethnic encounters carry baseline tension scaled by both parties' ethnic passion
+  // Cross-ethnic encounters carry baseline tension scaled by both parties'
+  // ethnic passion AND modulated by the live RELATIONS matrix: allies dampen,
+  // enemies amplify, plus a flat shift from the relation itself.
   if (!sameEth) {
-    tension += (a.ethnicPassion + b.ethnicPassion) * 0.5;
+    const rel = relation(a.ethnicity, b.ethnicity);
+    tension += (a.ethnicPassion + b.ethnicPassion) * 0.5 * (1 - rel * 0.6);
+    tension -= rel * 0.4;
   }
   // Political and violence proclivities add to it
   tension += (a.politicalPassion + b.politicalPassion) * 0.15;
@@ -1400,8 +1470,12 @@ function killPerson(victim, killer) {
   const settlement = GAME.settlements.find(s => s.name === victim.place);
   if (settlement) {
     if (killer && killer.ethnicity !== victim.ethnicity) {
-      // Cross-ethnic killing — this is the trigger for ethnic flight.
+      // Cross-ethnic killing — drives ethnic flight AND identifies a perpetrator
+      // for the raid system's grievance counter.
       settlement.trauma[victim.ethnicity] = (settlement.trauma[victim.ethnicity] || 0) + 1.0;
+      const g = settlement.grievance[victim.ethnicity];
+      g[killer.ethnicity] = (g[killer.ethnicity] || 0) + 1.0;
+      adjustRelation(victim.ethnicity, killer.ethnicity, -0.04);
     } else {
       // Intra-ethnic or unknown — still raises tension, but less so
       settlement.trauma[victim.ethnicity] = (settlement.trauma[victim.ethnicity] || 0) + 0.3;
@@ -1594,9 +1668,10 @@ function tickDemographics(dt) {
     for (const eth of ETHNICITIES) {
       const trauma = s.trauma[eth] || 0;
       if (trauma < 0.5) continue; // not enough violence yet to trigger flight
-      // Count armed defenders of this group still in the settlement
+      // Count armed defenders of this group still in the settlement.
+      // Raiders are away from home and don't count as protection.
       const armedDefenders = W.people.filter(p =>
-        p.alive && !p.fleeing && p.place === s.name &&
+        p.alive && !p.fleeing && !p.raiding && p.place === s.name &&
         p.ethnicity === eth && p.armed
       ).length;
       // Recourse factor: more defenders = less likely to flee.
@@ -1606,7 +1681,7 @@ function tickDemographics(dt) {
       const pressure = trauma * (1 - recourse * 0.7);
       // Roll: people of this ethnicity in this place may flee
       const candidates = W.people.filter(p =>
-        p.alive && !p.fleeing && p.place === s.name &&
+        p.alive && !p.fleeing && !p.raiding && p.place === s.name &&
         p.ethnicity === eth && p.role !== 'soldier'
       );
       // The more pressure, the more likely *each* person flees this tick.
@@ -1645,6 +1720,239 @@ function beginFlight(p, fromSettlement) {
   p.fleeingExitX = exitTx;
   p.fleeingExitY = exitTy;
   setBubble(p, '→', 3000);
+}
+
+// ============================================================
+// RAID SYSTEM
+// A settlement with a high grievance counter against ethnicity Y, and
+// armed members of the aggrieved ethnicity X present, can dispatch a
+// 3-5 person raiding party to a nearby Y-dominated settlement. Raiders
+// march together, burn houses, fight defenders who engage, then walk home.
+// Each raid raises the target's counter-grievance — so raids beget raids.
+// ============================================================
+const RAID_GRIEVANCE_THRESHOLD = 2.0;
+const RAID_PARTY_MIN = 3;
+const RAID_PARTY_MAX = 5;
+const RAID_RANGE = 12;            // tiles
+const RAID_COOLDOWN_MS = 30000;
+const RAID_ATTACK_DURATION = 25000;
+const RAID_GRIEVANCE_DECAY = 0.975; // per demographic tick (~2s)
+
+let raidTickAccumulator = 0;
+function tickRaids(dt) {
+  if (GAME.ended) return;
+
+  // Always advance per-frame state (movement, burns, transitions) so raids
+  // feel responsive instead of pulsing in 1.5s steps.
+  for (const r of [...GAME.raids]) updateRaid(r, dt);
+
+  // Spawn checks throttled — they're expensive and don't need to be tight.
+  raidTickAccumulator += dt;
+  if (raidTickAccumulator < 1500) return;
+  raidTickAccumulator = 0;
+
+  // Decay grievance independently of trauma (slower) so raids stay reachable.
+  for (const s of GAME.settlements) {
+    for (const v of ETHNICITIES) {
+      const row = s.grievance[v];
+      for (const k of Object.keys(row)) {
+        row[k] *= RAID_GRIEVANCE_DECAY;
+        if (row[k] < 0.01) delete row[k];
+      }
+    }
+  }
+
+  // Try to spawn new raids
+  for (const s of GAME.settlements) {
+    if (s.destroyed) continue;
+    if ((GAME.raidCooldowns[s.name] || 0) > GAME.ticks) continue;
+
+    // Tally armed adults per ethnicity who are home and not already raiding.
+    const armedByEth = {};
+    for (const p of W.people) {
+      if (!p.alive || p.fleeing || p.raiding) continue;
+      if (p.place !== s.name) continue;
+      if (!p.armed || p.role === 'child') continue;
+      armedByEth[p.ethnicity] = (armedByEth[p.ethnicity] || 0) + 1;
+    }
+
+    for (const ourEth of ETHNICITIES) {
+      if ((armedByEth[ourEth] || 0) < RAID_PARTY_MIN) continue;
+      // Pick the perpetrator with highest grievance from us, above threshold.
+      const grievs = s.grievance[ourEth] || {};
+      let enemyEth = null, top = RAID_GRIEVANCE_THRESHOLD;
+      for (const k of Object.keys(grievs)) {
+        if (grievs[k] > top) { top = grievs[k]; enemyEth = k; }
+      }
+      if (!enemyEth) continue;
+      // Don't raid current allies even if grievance has accumulated.
+      if (relation(ourEth, enemyEth) > 0.2) continue;
+      const target = findRaidTarget(s, enemyEth);
+      if (!target) continue;
+      if (spawnRaid(s, target, ourEth, enemyEth)) {
+        // Raid launched — grievance partly discharged, settlement on cooldown.
+        grievs[enemyEth] *= 0.3;
+        GAME.raidCooldowns[s.name] = GAME.ticks + RAID_COOLDOWN_MS;
+        break; // one raid per settlement per cycle
+      }
+    }
+  }
+}
+
+function findRaidTarget(fromS, enemyEth) {
+  let best = null, bestD = Infinity;
+  for (const t of GAME.settlements) {
+    if (t === fromS || t.destroyed) continue;
+    if (t.dominant !== enemyEth) continue;
+    const d = Math.hypot(t.tx - fromS.tx, t.ty - fromS.ty);
+    if (d > RAID_RANGE) continue;
+    if (d < bestD) { bestD = d; best = t; }
+  }
+  return best;
+}
+
+function spawnRaid(fromS, toS, ourEth, enemyEth) {
+  const candidates = W.people.filter(p =>
+    p.alive && !p.fleeing && !p.raiding && p.armed &&
+    p.place === fromS.name && p.ethnicity === ourEth &&
+    p.role !== 'child' && p.role !== 'priest' && p.role !== 'teacher'
+  );
+  if (candidates.length < RAID_PARTY_MIN) return false;
+  const partySize = Math.min(
+    candidates.length,
+    RAID_PARTY_MIN + Math.floor(Math.random() * (RAID_PARTY_MAX - RAID_PARTY_MIN + 1))
+  );
+  // Prefer the most violence-prone candidates.
+  candidates.sort((a, b) => b.violenceProclivity - a.violenceProclivity);
+  const party = candidates.slice(0, partySize);
+  const raid = {
+    id: 'raid_' + GAME.ticks + '_' + Math.floor(Math.random() * 1000),
+    fromName: fromS.name,
+    toName: toS.name,
+    ourEth, enemyEth,
+    state: 'travelingOut',
+    participants: party.map(p => p.id),
+    attackUntil: 0,
+    nextBurnAt: 0,
+  };
+  for (const p of party) {
+    p.raiding = true;
+    p.raidId = raid.id;
+    setBubble(p, '⚔', 4000);
+    sendRaiderTo(p, toS, 1.5);
+  }
+  GAME.raids.push(raid);
+  GAME.raidsLaunched++;
+  addFeed(
+    `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${toS.name}.`,
+    'red-event'
+  );
+  return true;
+}
+
+function sendRaiderTo(p, settlement, jitter) {
+  const tx = settlement.tx + (Math.random() - 0.5) * jitter;
+  const ty = settlement.ty + (Math.random() - 0.5) * jitter;
+  p.path = buildPathTo(p, { tx, ty });
+  p.pathIdx = 0;
+  p.state = 'moving';
+  p.nextDwell = [200, 400];
+  p.currentPoi = { kind: 'raid', label: settlement.name, tx, ty };
+}
+
+function updateRaid(raid, dt) {
+  const fromS = GAME.settlements.find(s => s.name === raid.fromName);
+  const toS = GAME.settlements.find(s => s.name === raid.toName);
+  const party = raid.participants
+    .map(id => W.people.find(p => p.id === id))
+    .filter(p => p && p.alive);
+
+  // Whole party wiped — clean up.
+  if (party.length === 0) {
+    GAME.raids = GAME.raids.filter(r => r !== raid);
+    return;
+  }
+
+  if (raid.state === 'travelingOut') {
+    // If most have arrived at the target, switch to attacking.
+    let arrived = 0;
+    for (const p of party) {
+      const d = Math.hypot(p.tx - toS.tx, p.ty - toS.ty);
+      if (d < toS.radius + 0.5) arrived++;
+    }
+    if (arrived >= Math.max(1, Math.ceil(party.length * 0.7))) {
+      raid.state = 'attacking';
+      raid.attackUntil = GAME.ticks + RAID_ATTACK_DURATION;
+      raid.nextBurnAt = GAME.ticks + 1200;
+      addFeed(`Raiders reach ${toS.name}.`, 'red-event');
+    } else {
+      // Anyone who's gone idle gets re-routed toward the target.
+      for (const p of party) {
+        if (p.state === 'idle') sendRaiderTo(p, toS, 1.8);
+      }
+    }
+  } else if (raid.state === 'attacking') {
+    // Periodically burn an unburned slot.
+    if (GAME.ticks > raid.nextBurnAt) {
+      const slotCount = toS.isCity ? 7 : 4;
+      const unburned = [];
+      for (let i = 0; i < slotCount; i++) {
+        if (!toS.burnedSlots.includes(i)) unburned.push(i);
+      }
+      if (unburned.length > 0) {
+        const slot = unburned[Math.floor(Math.random() * unburned.length)];
+        toS.burnedSlots.push(slot);
+        GAME.recentViolence += 3;
+        renderWorldFeatures();
+        addFeed(`Raiders torch a building in ${toS.name}.`, 'strike-event');
+      }
+      raid.nextBurnAt = GAME.ticks + 1500 + Math.random() * 1500;
+    }
+    // Wander inside the target while the attack window is open.
+    for (const p of party) {
+      if (p.state === 'idle') sendRaiderTo(p, toS, 2.5);
+    }
+    // End conditions: timer out, or every house burned.
+    const slotCount = toS.isCity ? 7 : 4;
+    const allBurned = toS.burnedSlots.length >= slotCount;
+    if (GAME.ticks > raid.attackUntil || allBurned) {
+      // Counter-grievance and trauma push the cycle the other way.
+      const tg = toS.grievance[raid.enemyEth];
+      tg[raid.ourEth] = (tg[raid.ourEth] || 0) + 2.0;
+      toS.trauma[raid.enemyEth] = (toS.trauma[raid.enemyEth] || 0) + 1.5;
+      adjustRelation(raid.ourEth, raid.enemyEth, -0.10);
+      if (allBurned && !toS.destroyed) {
+        toS.destroyed = true;
+        const f = W.features.find(x => x.name === toS.name);
+        if (f) f.destroyed = true;
+        GAME.villagesDestroyed++;
+        _territoryVersion++;
+        addFeed(`${toS.name} has been razed.`, 'strike-event');
+      }
+      raid.state = 'returning';
+      for (const p of party) sendRaiderTo(p, fromS, 1.5);
+    }
+  } else if (raid.state === 'returning') {
+    let arrived = 0;
+    for (const p of party) {
+      const d = Math.hypot(p.tx - fromS.tx, p.ty - fromS.ty);
+      if (d < fromS.radius + 0.5) arrived++;
+    }
+    if (arrived >= party.length) {
+      for (const p of party) {
+        p.raiding = false;
+        p.raidId = null;
+        p.state = 'idle';
+        p.dwellTimer = 200 + Math.random() * 400;
+      }
+      GAME.raids = GAME.raids.filter(r => r !== raid);
+      addFeed(`Raiders return to ${fromS.name}.`, 'player-event');
+    } else {
+      for (const p of party) {
+        if (p.state === 'idle') sendRaiderTo(p, fromS, 1.5);
+      }
+    }
+  }
 }
 
 // ============================================================
@@ -2087,13 +2395,15 @@ function drawTree(parent, tx, ty, burned) {
 function drawVillage(parent, v) {
   const cx = v.tx, cy = v.ty;
   const isDestroyed = v.destroyed === true;
+  const settlement = GAME.settlements.find(s => s.name === v.name);
+  const burnedSlots = settlement ? settlement.burnedSlots : [];
   const count = 4;
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2 + 0.3;
     const r = 0.7;
     const tx = cx + Math.cos(angle) * r;
     const ty = cy + Math.sin(angle) * r;
-    if (isDestroyed) {
+    if (isDestroyed || burnedSlots.includes(i)) {
       drawRuin(parent, tx, ty, 'house');
     } else {
       drawHouse(parent, tx, ty, 'house');
@@ -2121,6 +2431,8 @@ function drawVillage(parent, v) {
 function drawCity(parent, c) {
   const cx = c.tx, cy = c.ty;
   const isDestroyed = c.destroyed === true;
+  const settlement = GAME.settlements.find(s => s.name === c.name);
+  const burnedSlots = settlement ? settlement.burnedSlots : [];
   const positions = [
     [-1.2, -1.2, 'house'],
     [0.0, -1.4, 'townhouse'],
@@ -2130,8 +2442,9 @@ function drawCity(parent, c) {
     [-0.8, 1.1, 'house'],
     [0.8, 1.2, 'house'],
   ];
-  for (const [dx, dy, kind] of positions) {
-    if (isDestroyed) {
+  for (let i = 0; i < positions.length; i++) {
+    const [dx, dy, kind] = positions[i];
+    if (isDestroyed || burnedSlots.includes(i)) {
       drawRuin(parent, cx + dx, cy + dy, kind);
     } else {
       drawHouse(parent, cx + dx, cy + dy, kind);
@@ -2671,7 +2984,8 @@ function tickPeople(dt) {
         p.tx += (Math.random() - 0.5) * 0.04;
         p.ty += (Math.random() - 0.5) * 0.04;
       }
-      if (p.dwellTimer <= 0) {
+      // Raiders' next move is dictated by updateRaid() — skip normal POI picking.
+      if (!p.raiding && p.dwellTimer <= 0) {
         const choice = pickNextPOI(p);
         p.currentPoi = choice.poi;
         p.path = buildPathTo(p, choice.poi);
@@ -2699,7 +3013,7 @@ function tickPeople(dt) {
         const dx = wp.tx - p.tx;
         const dy = wp.ty - p.ty;
         const d = Math.hypot(dx, dy);
-        const speed = (p.fleeing ? 0.0050 : (p.role === 'child' ? 0.0040 : 0.0024)) * dt;
+        const speed = (p.fleeing ? 0.0040 : (p.role === 'child' ? 0.0032 : 0.0019)) * dt;
         if (d < speed * 1.2) {
           p.pathIdx += 1;
         } else {
@@ -2997,6 +3311,8 @@ function loop(t) {
   tickRed(dt);
   tickEconomy(dt);
   tickDemographics(dt);
+  tickRaids(dt);
+  tickRelations(dt);
   tickStability(dt);
   if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
     renderEthnicZones();
@@ -3066,8 +3382,8 @@ function redConsiderResponse() {
       .sort((a, b) => b[1] - a[1])[0];
     if (!playerArmed) return;
     const playerEth = playerArmed[0];
-    let target = ETHNIC_RIVALS[playerEth] || 'maroon';
-    // Don't pick same target the player chose
+    // Pick whichever group is currently most hostile to the player's pick.
+    let target = mostHostileTo(playerEth) || 'maroon';
     if (target === playerEth) target = 'yellow';
     // Schedule
     GAME.redCooldown = 3000 + Math.random() * 5000;
