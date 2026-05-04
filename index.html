@@ -2063,8 +2063,12 @@ function tickAdvisors(dt) {
   if (!GAME.advisorsDeployed && GAME.favoredEth) {
     const totalShipments = Object.values(GAME.playerGunsShipped)
       .reduce((s, n) => s + n, 0) / GUNS_PER_SHIPMENT;
+    // Use composition ≥ 50% (plurality) rather than s.dominant, which only
+    // fires above the strict 60% CONTROL_THRESHOLD. Settlements that hover
+    // around 55-65% would cycle in/out of dominant status from random
+    // fluctuations and silently fail this gate.
     const playerControlled = GAME.settlements.filter(s =>
-      !s.destroyed && s.dominant === GAME.favoredEth
+      !s.destroyed && (s.composition[GAME.favoredEth] || 0) >= 0.50
     ).length;
     if (
       totalShipments >= ADVISOR_TRIGGER_MIN_SHIPMENTS &&
