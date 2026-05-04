@@ -652,6 +652,23 @@ const ETHNIC_PALETTE = {
   },
 };
 
+// Soviet military advisors — visible as gray-shirted, red-accented sprites
+// embedded in Red-armed settlements. They count as members of their host
+// faction for relations/encounters, but their distinctive palette and the
+// `isAdvisor` flag mark them out. Always armed; periodically force-spawn
+// raids against the player's favored faction.
+const ADVISOR_PALETTE = {
+  shirt: '#3a3a3a',
+  accent: '#a52a2a',
+  hair: ['#1a1a1a', '#2a1a14', '#3a2818'],
+  skin: '#d4b896',
+};
+const ADVISOR_NAMES = ['Mikhail', 'Yuri', 'Vasily', 'Sergei', 'Pavel', 'Anatoli', 'Dmitri', 'Konstantin'];
+const ADVISORS_PER_SETTLEMENT = 2;
+const ADVISOR_HOST_SETTLEMENTS = 3;        // top N Red-armed settlements get advisors
+const ADVISOR_TRIGGER_TERRITORIES = 2;     // player-favored dominant settlements needed
+const ADVISOR_RAID_INTERVAL = 25000;       // ms between forced raids per host
+
 // Ethnic composition of each settlement (must sum to 1.0).
 // "Heartland" settlements are 70-85% one group; mixed towns spread.
 const ETHNIC_COMPOSITION = {
@@ -814,6 +831,9 @@ function generateWorld() {
       grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
       // Slot indices (within drawCity/drawVillage) of houses burned by raiders.
       burnedSlots: [],
+      // Soviet advisors present? (set true by deployAdvisors)
+      hasAdvisors: false,
+      advisorRaidTimer: 0,
     });
   }
   for (const v of villages) {
@@ -830,6 +850,8 @@ function generateWorld() {
       trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
       grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
       burnedSlots: [],
+      hasAdvisors: false,
+      advisorRaidTimer: 0,
     });
   }
 
@@ -1090,6 +1112,11 @@ const ROLE_SCHEDULES = {
     { kind: 'house',     dwell: [400, 800],  weight: 1 },
     { kind: 'chapel',    dwell: [300, 600],  weight: 1 },
   ],
+  advisor: [
+    { kind: 'market',    dwell: [600, 1200], weight: 3 },
+    { kind: 'workshop',  dwell: [400, 800],  weight: 2 },
+    { kind: 'house',     dwell: [300, 600],  weight: 1 },
+  ],
 };
 
 function generatePeople(place, isCity) {
@@ -1175,6 +1202,7 @@ function roleBias(role) {
     case 'miller':   return { pol: 0.3, vio: 0.2, eth: 0.4, eco: 0.7 };
     case 'teacher':  return { pol: 0.6, vio: 0.2, eth: 0.5, eco: 0.3 };
     case 'child':    return { pol: 0.2, vio: 0.3, eth: 0.3, eco: 0.2 };
+    case 'advisor':  return { pol: 0.8, vio: 0.7, eth: 0.6, eco: 0.2 };
     default:         return { pol: 0.4, vio: 0.4, eth: 0.4, eco: 0.5 };
   }
 }
@@ -1183,6 +1211,8 @@ function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
 function pickShirtForPerson(role, ethnicity) {
   const palette = ETHNIC_PALETTE[ethnicity];
+  // Advisors wear distinct gray uniforms — recognizable on sight.
+  if (role === 'advisor') return ADVISOR_PALETTE.shirt;
   // Soldiers wear uniforms regardless of ethnicity (they're conscripts/state)
   if (role === 'soldier') return '#7a3a3a';
   // Priests wear robes
@@ -1255,6 +1285,10 @@ const GAME = {
   raids: [],
   raidCooldowns: {},  // settlementName -> GAME.ticks at which next raid is allowed
   raidsLaunched: 0,
+  // Soviet advisor escalation (see ADVISORS section)
+  advisorsDeployed: false,
+  advisorsDeployedAt: 0,
+  advisorImpacts: 0,    // count of advisor-triggered raid burns + kills; gates airstrikes
 };
 
 // Threshold at which a settlement is considered "controlled" by an ethnicity.
@@ -1505,6 +1539,25 @@ function killPerson(victim, killer) {
     r.ethnicPassion = clamp01(r.ethnicPassion + 0.05 + Math.random() * 0.05);
     r.violenceProclivity = clamp01(r.violenceProclivity + 0.03 + Math.random() * 0.04);
   }
+  // If an advisor died, check whether their host settlement has any left.
+  // Killing all advisors lifts the forced-raid effect.
+  if (victim.role === 'advisor') {
+    const host = GAME.settlements.find(x => x.name === victim.place);
+    if (host && host.hasAdvisors) {
+      const remaining = W.people.filter(p =>
+        p.alive && p.role === 'advisor' && p.place === host.name
+      ).length;
+      if (remaining === 0) {
+        host.hasAdvisors = false;
+        addFeed(`The last advisor in ${host.name} is dead — Soviet pressure lifts there.`, 'player-event');
+      }
+    }
+  }
+  // Track advisor-raid kills toward the airstrike unlock counter.
+  if (killer && killer.raiding) {
+    const r = GAME.raids.find(x => x.id === killer.raidId);
+    if (r && r.advisorTriggered) GAME.advisorImpacts++;
+  }
   // Check end game
   checkEndGame();
 }
@@ -1578,34 +1631,15 @@ function tickStability(dt) {
 // ============================================================
 function checkAirstrikeUnlock() {
   if (AIRSTRIKE_AVAILABILITY.unlocked) return;
-  if (!GAME.favoredEth) return;
-  const fav = GAME.favoredEth;
-  // Track peak adult population of favored ethnicity
-  const currentPop = W.people.filter(p =>
-    p.alive && !p.fled && p.ethnicity === fav && p.role !== 'child'
-  ).length;
-  if (!AIRSTRIKE_AVAILABILITY._peakPop || currentPop > AIRSTRIKE_AVAILABILITY._peakPop) {
-    AIRSTRIKE_AVAILABILITY._peakPop = currentPop;
-  }
-  const peak = AIRSTRIKE_AVAILABILITY._peakPop;
-  // Track how many territories the favored ethnicity controls now
-  const currentTerritories = GAME.settlements.filter(s =>
-    !s.destroyed && s.dominant === fav
-  ).length;
-  if (!AIRSTRIKE_AVAILABILITY._peakTerritories || currentTerritories > AIRSTRIKE_AVAILABILITY._peakTerritories) {
-    AIRSTRIKE_AVAILABILITY._peakTerritories = currentTerritories;
-  }
-  const peakTerritories = AIRSTRIKE_AVAILABILITY._peakTerritories;
-
-  // Unlock condition: lost 25%+ of peak adults OR lost a territory
-  const popDrop = peak > 0 && currentPop < peak * 0.75;
-  const territoryLoss = peakTerritories > 0 && currentTerritories < peakTerritories;
-
-  if (popDrop || territoryLoss) {
-    AIRSTRIKE_AVAILABILITY.unlocked = true;
-    addFeed('CABLE FROM HEADQUARTERS: Air assets are now authorized for use in theater.', 'red-event');
-    renderAirstrikeButton();
-  }
+  // Airstrikes authorize only after Soviet escalation is confirmed: their
+  // advisors are deployed AND a Soviet-backed raid has already landed real
+  // damage (≥1 burn or kill). Mirrors the cold-war logic — US airpower
+  // arrives once the proxy war goes hot.
+  if (!GAME.advisorsDeployed) return;
+  if ((GAME.advisorImpacts || 0) < 1) return;
+  AIRSTRIKE_AVAILABILITY.unlocked = true;
+  addFeed('CABLE FROM HEADQUARTERS: Soviet escalation confirmed. Air assets authorized for use in theater.', 'red-event');
+  renderAirstrikeButton();
 }
 // Every ~2 seconds:
 //   1. Trauma to each ethnicity decays slowly (memory fades).
@@ -1830,11 +1864,12 @@ function findRaidTarget(fromS, enemyEth) {
   return best;
 }
 
-function spawnRaid(fromS, toS, ourEth, enemyEth) {
+function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
   const candidates = W.people.filter(p =>
     p.alive && !p.fleeing && !p.raiding && p.armed &&
     p.place === fromS.name && p.ethnicity === ourEth &&
-    p.role !== 'child' && p.role !== 'priest' && p.role !== 'teacher'
+    p.role !== 'child' && p.role !== 'priest' && p.role !== 'teacher' &&
+    p.role !== 'advisor'  // advisors orchestrate but don't march themselves
   );
   if (candidates.length < RAID_PARTY_MIN) return false;
   const partySize = Math.min(
@@ -1853,6 +1888,7 @@ function spawnRaid(fromS, toS, ourEth, enemyEth) {
     participants: party.map(p => p.id),
     attackUntil: 0,
     nextBurnAt: 0,
+    advisorTriggered: !!advisorTriggered,
   };
   for (const p of party) {
     p.raiding = true;
@@ -1862,10 +1898,17 @@ function spawnRaid(fromS, toS, ourEth, enemyEth) {
   }
   GAME.raids.push(raid);
   GAME.raidsLaunched++;
-  addFeed(
-    `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${toS.name}.`,
-    'red-event'
-  );
+  if (advisorTriggered) {
+    addFeed(
+      `Soviet-backed ${ETHNIC_LABELS[ourEth]} fighters mobilize from ${fromS.name} against ${toS.name}.`,
+      'red-event'
+    );
+  } else {
+    addFeed(
+      `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${toS.name}.`,
+      'red-event'
+    );
+  }
   return true;
 }
 
@@ -1938,6 +1981,7 @@ function updateRaid(raid, dt) {
         toS.burnedSlots.push(slot);
         raid.burnsDone++;
         GAME.recentViolence += 3;
+        if (raid.advisorTriggered) GAME.advisorImpacts++;
         renderBuildings();
         addFeed(`Raiders torch a building in ${toS.name}.`, 'strike-event');
       }
@@ -1987,6 +2031,132 @@ function updateRaid(raid, dt) {
         if (p.state === 'idle') sendRaiderTo(p, fromS, 1.5);
       }
     }
+  }
+}
+
+// ============================================================
+// SOVIET ADVISORS
+// Once the player's favored faction holds enough territory (signaling US
+// success), Red dispatches military advisors into its most-armed
+// settlements. Advisors are visible armed sprites in distinct gray dress;
+// their presence force-spawns periodic raids against the player's faction
+// regardless of organic grievance. Killing the last advisor in a settlement
+// lifts the forced-raid effect there. Damage caused by their proxy raids
+// gates the player's airstrike unlock — escalation begets escalation.
+// ============================================================
+function tickAdvisors(dt) {
+  if (GAME.ended) return;
+
+  // One-time deployment trigger: player's favored faction is dominant in
+  // ≥ ADVISOR_TRIGGER_TERRITORIES settlements and Red has armed someone.
+  if (!GAME.advisorsDeployed && GAME.favoredEth) {
+    const playerControlled = GAME.settlements.filter(s =>
+      !s.destroyed && s.dominant === GAME.favoredEth
+    ).length;
+    if (playerControlled >= ADVISOR_TRIGGER_TERRITORIES) {
+      const redEntry = Object.entries(GAME.redGunsShipped)
+        .filter(([k]) => k !== GAME.favoredEth)
+        .sort((a, b) => b[1] - a[1])[0];
+      if (redEntry && redEntry[1] > 0) deployAdvisors(redEntry[0]);
+    }
+  }
+
+  if (!GAME.advisorsDeployed) return;
+
+  // Per-settlement forced-raid timer. Each advisor settlement attempts to
+  // launch a raid against player-favored ethnicity every ~25s.
+  for (const s of GAME.settlements) {
+    if (!s.hasAdvisors || s.destroyed) continue;
+    s.advisorRaidTimer = (s.advisorRaidTimer || 0) - dt;
+    if (s.advisorRaidTimer > 0) continue;
+    s.advisorRaidTimer = ADVISOR_RAID_INTERVAL + Math.random() * 5000;
+    spawnAdvisorRaid(s);
+  }
+}
+
+function deployAdvisors(redEth) {
+  const candidates = GAME.settlements.filter(s =>
+    !s.destroyed && (s.composition[redEth] || 0) >= 0.30
+  );
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => (b.composition[redEth] || 0) - (a.composition[redEth] || 0));
+  const chosen = candidates.slice(0, Math.min(ADVISOR_HOST_SETTLEMENTS, candidates.length));
+
+  for (const s of chosen) {
+    s.hasAdvisors = true;
+    s.advisorRaidTimer = ADVISOR_RAID_INTERVAL;
+    for (let i = 0; i < ADVISORS_PER_SETTLEMENT; i++) {
+      spawnAdvisorPerson(s, redEth);
+    }
+  }
+
+  GAME.advisorsDeployed = true;
+  GAME.advisorsDeployedAt = GAME.ticks;
+  addFeed(`SOVIET MILITARY ADVISORS observed in ${ETHNIC_LABELS[redEth]} territory — ${chosen.map(s => s.name).join(', ')}.`, 'red-event');
+  // New people exist — rebuild the people layer so their sprites appear.
+  renderPeople();
+}
+
+function spawnAdvisorPerson(settlement, eth) {
+  const pois = W.pois[settlement.name] || [];
+  const homePoi = pois[Math.floor(Math.random() * pois.length)] ||
+                  { tx: settlement.tx, ty: settlement.ty, kind: 'house' };
+  const tx = homePoi.tx + (Math.random() - 0.5) * 0.4;
+  const ty = homePoi.ty + (Math.random() - 0.5) * 0.4;
+  const screen = tileToScreen(tx, ty);
+  const traits = generateTraits('advisor', eth);
+  const name = ADVISOR_NAMES[Math.floor(Math.random() * ADVISOR_NAMES.length)];
+  W.people.push({
+    id: 'person_' + W.people.length,
+    name,
+    role: 'advisor',
+    ethnicity: eth,
+    place: settlement.name,
+    x: screen.sx,
+    y: screen.sy,
+    tx, ty,
+    home: homePoi,
+    state: 'idle',
+    currentPoi: homePoi,
+    dwellTimer: Math.random() * 600,
+    path: [],
+    pathIdx: 0,
+    facing: 0,
+    seed: Math.random(),
+    shirt: ADVISOR_PALETTE.shirt,
+    accent: ADVISOR_PALETTE.accent,
+    hair: ADVISOR_PALETTE.hair[Math.floor(Math.random() * ADVISOR_PALETTE.hair.length)],
+    skin: ADVISOR_PALETTE.skin,
+    ...traits,
+    alive: true,
+    armed: true,        // advisors always carry rifles
+    isAdvisor: true,
+    encounterCooldown: 0,
+    bubble: null,
+    stunnedUntil: 0,
+  });
+}
+
+function spawnAdvisorRaid(s) {
+  if (!GAME.favoredEth) return;
+  if ((GAME.raidCooldowns[s.name] || 0) > GAME.ticks) return;
+  // Pick the most-armed local ethnicity (excluding player's favored) as raiders.
+  const armedByEth = {};
+  for (const p of W.people) {
+    if (!p.alive || p.fleeing || p.raiding) continue;
+    if (p.place !== s.name || !p.armed || p.role === 'child') continue;
+    armedByEth[p.ethnicity] = (armedByEth[p.ethnicity] || 0) + 1;
+  }
+  let bestEth = null, bestN = RAID_PARTY_MIN - 1;
+  for (const [eth, n] of Object.entries(armedByEth)) {
+    if (eth === GAME.favoredEth) continue;
+    if (n > bestN) { bestN = n; bestEth = eth; }
+  }
+  if (!bestEth) return;
+  const target = findRaidTarget(s, GAME.favoredEth);
+  if (!target) return;
+  if (spawnRaid(s, target, bestEth, GAME.favoredEth, true)) {
+    GAME.raidCooldowns[s.name] = GAME.ticks + RAID_COOLDOWN_MS;
   }
 }
 
@@ -3347,6 +3517,7 @@ function loop(t) {
   tickEconomy(dt);
   tickDemographics(dt);
   tickRaids(dt);
+  tickAdvisors(dt);
   tickRelations(dt);
   tickStability(dt);
   if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
