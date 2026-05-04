@@ -666,7 +666,14 @@ const ADVISOR_PALETTE = {
 const ADVISOR_NAMES = ['Mikhail', 'Yuri', 'Vasily', 'Sergei', 'Pavel', 'Anatoli', 'Dmitri', 'Konstantin'];
 const ADVISORS_PER_SETTLEMENT = 2;
 const ADVISOR_HOST_SETTLEMENTS = 3;        // top N Red-armed settlements get advisors
-const ADVISOR_TRIGGER_TERRITORIES = 2;     // player-favored dominant settlements needed
+const ADVISOR_TRIGGER_TERRITORIES = 1;     // player-favored dominant settlements needed
+                                           // — just one, so variance in mid-tier seeded
+                                           // settlements (Velsen 65% sometimes drops
+                                           // below the 60% control threshold) doesn't
+                                           // block deployment. Commitment + time gates
+                                           // do the real work of preventing fire-too-early.
+const ADVISOR_TRIGGER_MIN_TICKS = 60000;   // ms — at least this long after game start
+const ADVISOR_TRIGGER_MIN_SHIPMENTS = 4;   // player must have clearly committed
 const ADVISOR_RAID_INTERVAL = 25000;       // ms between forced raids per host
 
 // Ethnic composition of each settlement (must sum to 1.0).
@@ -2047,13 +2054,23 @@ function updateRaid(raid, dt) {
 function tickAdvisors(dt) {
   if (GAME.ended) return;
 
-  // One-time deployment trigger: player's favored faction is dominant in
-  // ≥ ADVISOR_TRIGGER_TERRITORIES settlements and Red has armed someone.
+  // One-time deployment trigger. All four conditions must be met:
+  //   1. The player has committed (≥ N gun shipments).
+  //   2. Enough sim time has passed (≥ N seconds — natural warm-up).
+  //   3. The player's favored faction is dominant in ≥ N settlements
+  //      (baseline is 2 from seed; threshold is 3 = real territorial gain).
+  //   4. Red has armed at least one rival faction.
   if (!GAME.advisorsDeployed && GAME.favoredEth) {
+    const totalShipments = Object.values(GAME.playerGunsShipped)
+      .reduce((s, n) => s + n, 0) / GUNS_PER_SHIPMENT;
     const playerControlled = GAME.settlements.filter(s =>
       !s.destroyed && s.dominant === GAME.favoredEth
     ).length;
-    if (playerControlled >= ADVISOR_TRIGGER_TERRITORIES) {
+    if (
+      totalShipments >= ADVISOR_TRIGGER_MIN_SHIPMENTS &&
+      GAME.ticks >= ADVISOR_TRIGGER_MIN_TICKS &&
+      playerControlled >= ADVISOR_TRIGGER_TERRITORIES
+    ) {
       const redEntry = Object.entries(GAME.redGunsShipped)
         .filter(([k]) => k !== GAME.favoredEth)
         .sort((a, b) => b[1] - a[1])[0];
@@ -2062,6 +2079,21 @@ function tickAdvisors(dt) {
   }
 
   if (!GAME.advisorsDeployed) return;
+
+  // Defensive sweep: if a settlement is flagged hasAdvisors but no living
+  // advisor sprite is actually there, clear the flag. Catches death paths
+  // that bypass killPerson's cleanup (airstrikes, simultaneous-death edge
+  // cases in tryEncounter where ordering can skip the per-victim check).
+  for (const s of GAME.settlements) {
+    if (!s.hasAdvisors) continue;
+    const alive = W.people.some(p =>
+      p.alive && p.role === 'advisor' && p.place === s.name
+    );
+    if (!alive) {
+      s.hasAdvisors = false;
+      addFeed(`The advisors in ${s.name} are gone — Soviet pressure lifts.`, 'player-event');
+    }
+  }
 
   // Per-settlement forced-raid timer. Each advisor settlement attempts to
   // launch a raid against player-favored ethnicity every ~25s.
@@ -2084,7 +2116,10 @@ function deployAdvisors(redEth) {
 
   for (const s of chosen) {
     s.hasAdvisors = true;
-    s.advisorRaidTimer = ADVISOR_RAID_INTERVAL;
+    // Initial timer is half-interval so the first advisor raid lands
+    // before the player has time to wipe out advisor sprites with
+    // their well-armed faction.
+    s.advisorRaidTimer = ADVISOR_RAID_INTERVAL / 2;
     for (let i = 0; i < ADVISORS_PER_SETTLEMENT; i++) {
       spawnAdvisorPerson(s, redEth);
     }
@@ -2093,6 +2128,11 @@ function deployAdvisors(redEth) {
   GAME.advisorsDeployed = true;
   GAME.advisorsDeployedAt = GAME.ticks;
   addFeed(`SOVIET MILITARY ADVISORS observed in ${ETHNIC_LABELS[redEth]} territory — ${chosen.map(s => s.name).join(', ')}.`, 'red-event');
+  // Fire the first wave of advisor-triggered raids immediately on deploy.
+  // Without this, advisors often die before their interval timer ticks down,
+  // breaking the airstrike-unlock chain. Advisors are arranging this raid as
+  // they arrive — the player sees both events together as a clear escalation.
+  for (const s of chosen) spawnAdvisorRaid(s);
   // New people exist — rebuild the people layer so their sprites appear.
   renderPeople();
 }
@@ -2139,7 +2179,10 @@ function spawnAdvisorPerson(settlement, eth) {
 
 function spawnAdvisorRaid(s) {
   if (!GAME.favoredEth) return;
-  if ((GAME.raidCooldowns[s.name] || 0) > GAME.ticks) return;
+  // No raidCooldowns check — advisor raids are forced, paced by
+  // `s.advisorRaidTimer` and (at deploy time) by deployAdvisors. Sharing
+  // the organic-raid cooldown blocked deploy-time fires whenever Pellish
+  // had recently raided Cassora (which is often).
   // Pick the most-armed local ethnicity (excluding player's favored) as raiders.
   const armedByEth = {};
   for (const p of W.people) {
