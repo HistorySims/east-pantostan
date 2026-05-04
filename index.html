@@ -666,11 +666,12 @@ const ADVISOR_PALETTE = {
 const ADVISOR_NAMES = ['Mikhail', 'Yuri', 'Vasily', 'Sergei', 'Pavel', 'Anatoli', 'Dmitri', 'Konstantin'];
 const ADVISORS_PER_SETTLEMENT = 2;
 const ADVISOR_HOST_SETTLEMENTS = 3;        // top N Red-armed settlements get advisors
-const ADVISOR_TRIGGER_TERRITORIES = 3;     // player-favored dominant settlements needed
-                                           // (baseline is 2 from seeded composition,
-                                           // so requiring 3 means real territorial gain)
-const ADVISOR_TRIGGER_MIN_TICKS = 60000;   // ms — also wait at least this long
-const ADVISOR_TRIGGER_MIN_SHIPMENTS = 3;   // require player to have committed
+const ADVISOR_TRIGGER_TERRITORIES = 2;     // player-favored dominant settlements needed
+                                           // (matches the natural seeded baseline so we
+                                           // gate on commitment + time, not on flipping
+                                           // settlements which is rare in 5min sessions)
+const ADVISOR_TRIGGER_MIN_TICKS = 60000;   // ms — at least this long after game start
+const ADVISOR_TRIGGER_MIN_SHIPMENTS = 4;   // player must have clearly committed
 const ADVISOR_RAID_INTERVAL = 25000;       // ms between forced raids per host
 
 // Ethnic composition of each settlement (must sum to 1.0).
