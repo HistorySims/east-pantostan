@@ -2179,7 +2179,10 @@ function spawnAdvisorPerson(settlement, eth) {
 
 function spawnAdvisorRaid(s) {
   if (!GAME.favoredEth) return;
-  if ((GAME.raidCooldowns[s.name] || 0) > GAME.ticks) return;
+  // No raidCooldowns check — advisor raids are forced, paced by
+  // `s.advisorRaidTimer` and (at deploy time) by deployAdvisors. Sharing
+  // the organic-raid cooldown blocked deploy-time fires whenever Pellish
+  // had recently raided Cassora (which is often).
   // Pick the most-armed local ethnicity (excluding player's favored) as raiders.
   const armedByEth = {};
   for (const p of W.people) {
