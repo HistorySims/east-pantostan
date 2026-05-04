@@ -2128,6 +2128,11 @@ function deployAdvisors(redEth) {
   GAME.advisorsDeployed = true;
   GAME.advisorsDeployedAt = GAME.ticks;
   addFeed(`SOVIET MILITARY ADVISORS observed in ${ETHNIC_LABELS[redEth]} territory — ${chosen.map(s => s.name).join(', ')}.`, 'red-event');
+  // Fire the first wave of advisor-triggered raids immediately on deploy.
+  // Without this, advisors often die before their interval timer ticks down,
+  // breaking the airstrike-unlock chain. Advisors are arranging this raid as
+  // they arrive — the player sees both events together as a clear escalation.
+  for (const s of chosen) spawnAdvisorRaid(s);
   // New people exist — rebuild the people layer so their sprites appear.
   renderPeople();
 }
