@@ -666,10 +666,12 @@ const ADVISOR_PALETTE = {
 const ADVISOR_NAMES = ['Mikhail', 'Yuri', 'Vasily', 'Sergei', 'Pavel', 'Anatoli', 'Dmitri', 'Konstantin'];
 const ADVISORS_PER_SETTLEMENT = 2;
 const ADVISOR_HOST_SETTLEMENTS = 3;        // top N Red-armed settlements get advisors
-const ADVISOR_TRIGGER_TERRITORIES = 2;     // player-favored dominant settlements needed
-                                           // (matches the natural seeded baseline so we
-                                           // gate on commitment + time, not on flipping
-                                           // settlements which is rare in 5min sessions)
+const ADVISOR_TRIGGER_TERRITORIES = 1;     // player-favored dominant settlements needed
+                                           // — just one, so variance in mid-tier seeded
+                                           // settlements (Velsen 65% sometimes drops
+                                           // below the 60% control threshold) doesn't
+                                           // block deployment. Commitment + time gates
+                                           // do the real work of preventing fire-too-early.
 const ADVISOR_TRIGGER_MIN_TICKS = 60000;   // ms — at least this long after game start
 const ADVISOR_TRIGGER_MIN_SHIPMENTS = 4;   // player must have clearly committed
 const ADVISOR_RAID_INTERVAL = 25000;       // ms between forced raids per host
