@@ -2190,11 +2190,14 @@ function spawnAdvisorRaid(s) {
   // `s.advisorRaidTimer` and (at deploy time) by deployAdvisors. Sharing
   // the organic-raid cooldown blocked deploy-time fires whenever Pellish
   // had recently raided Cassora (which is often).
-  // Pick the most-armed local ethnicity (excluding player's favored) as raiders.
+  // Filter must match spawnRaid's candidate criteria so this count reflects
+  // actual eligibility — earlier loose filter let bestN say "ok" while
+  // spawnRaid found <RAID_PARTY_MIN candidates and bounced for minutes.
   const armedByEth = {};
   for (const p of W.people) {
     if (!p.alive || p.fleeing || p.raiding) continue;
-    if (p.place !== s.name || !p.armed || p.role === 'child') continue;
+    if (p.place !== s.name || !p.armed) continue;
+    if (p.role === 'child' || p.role === 'priest' || p.role === 'teacher') continue;
     armedByEth[p.ethnicity] = (armedByEth[p.ethnicity] || 0) + 1;
   }
   let bestEth = null, bestN = RAID_PARTY_MIN - 1;
