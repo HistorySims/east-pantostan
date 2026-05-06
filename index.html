@@ -666,6 +666,12 @@ const ADVISOR_PALETTE = {
 const ADVISOR_NAMES = ['Mikhail', 'Yuri', 'Vasily', 'Sergei', 'Pavel', 'Anatoli', 'Dmitri', 'Konstantin'];
 const ADVISORS_PER_SETTLEMENT = 2;
 const ADVISOR_HOST_SETTLEMENTS = 3;        // top N Red-armed settlements get advisors
+const ADVISOR_RAID_PARTY_MIN = 2;          // advisor raids can be tighter (2 advisors
+                                           // + 0-1 locals) — they're directed strikes,
+                                           // not militia mobs. Lower floor keeps the
+                                           // forced-raid chain from stalling when host
+                                           // settlements have few non-priest non-teacher
+                                           // armed locals.
 const ADVISOR_TRIGGER_TERRITORIES = 1;     // player-favored dominant settlements needed
                                            // — just one, so variance in mid-tier seeded
                                            // settlements (Velsen 65% sometimes drops
@@ -1881,10 +1887,11 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
     // when local violet has just barely RAID_PARTY_MIN-1 armed adults.
     (advisorTriggered || p.role !== 'advisor')
   );
-  if (candidates.length < RAID_PARTY_MIN) return false;
+  const minParty = advisorTriggered ? ADVISOR_RAID_PARTY_MIN : RAID_PARTY_MIN;
+  if (candidates.length < minParty) return false;
   const partySize = Math.min(
     candidates.length,
-    RAID_PARTY_MIN + Math.floor(Math.random() * (RAID_PARTY_MAX - RAID_PARTY_MIN + 1))
+    minParty + Math.floor(Math.random() * (RAID_PARTY_MAX - minParty + 1))
   );
   // Prefer the most violence-prone candidates.
   candidates.sort((a, b) => b.violenceProclivity - a.violenceProclivity);
@@ -2200,7 +2207,7 @@ function spawnAdvisorRaid(s) {
     if (p.role === 'child' || p.role === 'priest' || p.role === 'teacher') continue;
     armedByEth[p.ethnicity] = (armedByEth[p.ethnicity] || 0) + 1;
   }
-  let bestEth = null, bestN = RAID_PARTY_MIN - 1;
+  let bestEth = null, bestN = ADVISOR_RAID_PARTY_MIN - 1;
   for (const [eth, n] of Object.entries(armedByEth)) {
     if (eth === GAME.favoredEth) continue;
     if (n > bestN) { bestN = n; bestEth = eth; }
