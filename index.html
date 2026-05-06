@@ -1876,7 +1876,10 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
     p.alive && !p.fleeing && !p.raiding && p.armed &&
     p.place === fromS.name && p.ethnicity === ourEth &&
     p.role !== 'child' && p.role !== 'priest' && p.role !== 'teacher' &&
-    p.role !== 'advisor'  // advisors orchestrate but don't march themselves
+    // Advisors march with the proxy fighters they're directing — both
+    // dramatically right and a practical fix for advisor raids failing
+    // when local violet has just barely RAID_PARTY_MIN-1 armed adults.
+    (advisorTriggered || p.role !== 'advisor')
   );
   if (candidates.length < RAID_PARTY_MIN) return false;
   const partySize = Math.min(
