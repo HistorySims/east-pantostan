@@ -230,12 +230,25 @@ color: #2a1f15;
 -webkit-tap-highlight-color: transparent;
 }
 .hud-btn:hover { background: #f0e2c0; }
-.hud-btn:disabled { opacity: 0.35; }
-.hud-btn[data-eth="purple"]:hover { background: #d8b8e0; }
-.hud-btn[data-eth="violet"]:hover { background: #e8c0ee; }
-.hud-btn[data-eth="indigo"]:hover { background: #b8c0e8; }
-.hud-btn[data-eth="maroon"]:hover { background: #e8b8b8; }
-.hud-btn[data-eth="yellow"]:hover { background: #f0e0a0; }
+.hud-btn:disabled { opacity: 0.35; cursor: default; }
+.hud-btn-wide {
+font-size: 11px;
+font-weight: 700;
+padding: 6px 8px;
+width: 100%;
+letter-spacing: 0.05em;
+}
+.hud-btn-wide.armed {
+background: #2a1f15;
+color: #f0e2c0;
+}
+.hud-hint {
+font-size: 9px;
+font-style: italic;
+color: #5a4a35;
+margin-top: 3px;
+min-height: 12px;
+}
 .hud-feed {
 font-family: monospace;
 font-size: 9px;
@@ -468,6 +481,7 @@ cursor: pointer;
     <g id="ethnicZoneLayer" pointer-events="none"></g>
     <g id="forestLayer"></g>
     <g id="buildingLayer"></g>
+    <g id="cratesLayer"></g>
     <g id="peopleLayer"></g>
   </g>
 </svg>
@@ -500,12 +514,9 @@ cursor: pointer;
     <div class="stability-track"><div class="stability-fill" id="hudStabilityFill"></div></div>
   </div>
   <div class="hud-buttons">
-    <button class="hud-btn" data-eth="purple" onclick="shipGuns('purple')">⌖ Purple</button>
-    <button class="hud-btn" data-eth="violet" onclick="shipGuns('violet')">⌖ Violet</button>
-    <button class="hud-btn" data-eth="indigo" onclick="shipGuns('indigo')">⌖ Indigo</button>
-    <button class="hud-btn" data-eth="maroon" onclick="shipGuns('maroon')">⌖ Maroon</button>
-    <button class="hud-btn" data-eth="yellow" onclick="shipGuns('yellow')">⌖ Yellow</button>
+    <button class="hud-btn hud-btn-wide" id="cratebtn" onclick="toggleCrateArmed()">⌖ DROP WEAPONS · $25</button>
   </div>
+  <div class="hud-hint" id="cratehint"></div>
   <div id="airstrikePanel"></div>
   <div class="hud-feed" id="hudFeed"></div>
 </div>
@@ -847,6 +858,10 @@ function generateWorld() {
       // Soviet advisors present? (set true by deployAdvisors)
       hasAdvisors: false,
       advisorRaidTimer: 0,
+      // Expansion AI: armed settlements periodically launch outward raids.
+      expansionTimer: 0,
+      // Track last violent event for births (peaceful repopulation).
+      lastConflictAt: 0,
     });
   }
   for (const v of villages) {
@@ -865,6 +880,10 @@ function generateWorld() {
       burnedSlots: [],
       hasAdvisors: false,
       advisorRaidTimer: 0,
+      // Expansion AI: armed settlements periodically launch outward raids.
+      expansionTimer: 0,
+      // Track last violent event for births (peaceful repopulation).
+      lastConflictAt: 0,
     });
   }
 
@@ -1265,12 +1284,15 @@ function lightenHex(hex, amt) {
 const GAME = {
   // Player (Blue) state
   playerMoney: 100,
-  playerGunsShipped: {},   // { ethnicity: count }
+  playerGunsShipped: {},   // { ethnicity: count } — derived from crate pickups
+  playerCratesDropped: 0,  // # of crates the player has dropped
+  // Crate drop targeting state (mirrors airstrikeArmed)
+  crateArmed: false,
   // Red AI state
   redMoney: 100,
   redGunsShipped: {},
   redCooldown: 0,          // ticks until Red may act again
-  redLastTargetEth: null,
+  redLastTargetSettlement: null,
   // Global counters
   deaths: 0,
   encounters: 0,
@@ -1302,6 +1324,8 @@ const GAME = {
   advisorsDeployed: false,
   advisorsDeployedAt: 0,
   advisorImpacts: 0,    // count of advisor-triggered raid burns + kills; gates airstrikes
+  // Active weapon crates dropped on the map
+  crates: [],
 };
 
 // Threshold at which a settlement is considered "controlled" by an ethnicity.
@@ -1566,11 +1590,17 @@ function killPerson(victim, killer) {
       }
     }
   }
-  // Track advisor-raid kills toward the airstrike unlock counter.
+  // Track raid kills toward various counters.
   if (killer && killer.raiding) {
     const r = GAME.raids.find(x => x.id === killer.raidId);
-    if (r && r.advisorTriggered) GAME.advisorImpacts++;
+    if (r) {
+      r.killsDone = (r.killsDone || 0) + 1;
+      if (r.advisorTriggered) GAME.advisorImpacts++;
+    }
   }
+  // Mark the victim's settlement as recently conflicted (suppresses births).
+  const victimS = GAME.settlements.find(x => x.name === victim.place);
+  if (victimS) victimS.lastConflictAt = GAME.ticks;
   // Check end game
   checkEndGame();
 }
@@ -1769,13 +1799,26 @@ function tickDemographics(dt) {
 
 function beginFlight(p, fromSettlement) {
   p.fleeing = true;
-  // Pick an exit direction — toward the edge of the world AWAY from settlement center
+  // Try to send refugees to a haven of their own ethnicity instead of
+  // exiting the map. War shifts populations toward kin homelands.
+  const haven = findRefugeeHaven(p, fromSettlement);
+  if (haven) {
+    p.fleeingTo = haven.name;
+    const tx = haven.tx + (Math.random() - 0.5) * 1.5;
+    const ty = haven.ty + (Math.random() - 0.5) * 1.5;
+    p.state = 'moving';
+    p.path = buildPathTo(p, { tx, ty });
+    p.pathIdx = 0;
+    p.currentPoi = { kind: 'refugee', label: haven.name, tx, ty };
+    setBubble(p, '→', 3000);
+    return;
+  }
+  // No haven — fall back to exiting the world.
   const dx = p.tx - fromSettlement.tx;
   const dy = p.ty - fromSettlement.ty;
   const len = Math.hypot(dx, dy) || 1;
   const exitTx = p.tx + (dx / len) * 8 + (Math.random() - 0.5) * 4;
   const exitTy = p.ty + (dy / len) * 8 + (Math.random() - 0.5) * 4;
-  // Override the AI: set them to walk to the exit, then mark for removal
   p.state = 'moving';
   p.path = [{ tx: exitTx, ty: exitTy }];
   p.pathIdx = 0;
@@ -1877,7 +1920,7 @@ function findRaidTarget(fromS, enemyEth) {
   return best;
 }
 
-function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
+function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered, expansion) {
   const candidates = W.people.filter(p =>
     p.alive && !p.fleeing && !p.raiding && p.armed &&
     p.place === fromS.name && p.ethnicity === ourEth &&
@@ -1906,6 +1949,9 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
     attackUntil: 0,
     nextBurnAt: 0,
     advisorTriggered: !!advisorTriggered,
+    expansion: !!expansion,
+    burnsDone: 0,
+    killsDone: 0,
   };
   for (const p of party) {
     p.raiding = true;
@@ -1918,6 +1964,11 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered) {
   if (advisorTriggered) {
     addFeed(
       `Soviet-backed ${ETHNIC_LABELS[ourEth]} fighters mobilize from ${fromS.name} against ${toS.name}.`,
+      'red-event'
+    );
+  } else if (expansion) {
+    addFeed(
+      `${ETHNIC_LABELS[ourEth]} from ${fromS.name} push toward ${toS.name}.`,
       'red-event'
     );
   } else {
@@ -1999,6 +2050,7 @@ function updateRaid(raid, dt) {
         raid.burnsDone++;
         GAME.recentViolence += 3;
         if (raid.advisorTriggered) GAME.advisorImpacts++;
+        toS.lastConflictAt = GAME.ticks;  // suppress nearby births
         renderBuildings();
         addFeed(`Raiders torch a building in ${toS.name}.`, 'strike-event');
       }
@@ -2025,6 +2077,25 @@ function updateRaid(raid, dt) {
         _territoryVersion++;
         addFeed(`${toS.name} has been razed.`, 'strike-event');
       }
+      // Expansion raids: if they did meaningful damage AND the target still
+      // stands, surviving raiders RESETTLE there — that's how territory
+      // actually shifts. Without this the map oscillates but never moves.
+      const damage = (raid.burnsDone || 0) + (raid.killsDone || 0);
+      if (raid.expansion && !toS.destroyed && damage >= EXPANSION_DAMAGE_FOR_RESETTLE) {
+        for (const p of party) {
+          p.raiding = false;
+          p.raidId = null;
+          p.place = toS.name;     // permanent flip
+          p.home = (W.pois[toS.name] || []).find(q => q.kind === 'house') ||
+                   { tx: toS.tx, ty: toS.ty, kind: 'house' };
+          p.state = 'idle';
+          p.dwellTimer = 400 + Math.random() * 600;
+          setBubble(p, '✓', 2500);
+        }
+        addFeed(`${ETHNIC_LABELS[raid.ourEth]} fighters settle in ${toS.name}.`, 'red-event');
+        GAME.raids = GAME.raids.filter(r => r !== raid);
+        return;
+      }
       raid.state = 'returning';
       for (const p of party) sendRaiderTo(p, fromS, 1.5);
     }
@@ -2049,6 +2120,155 @@ function updateRaid(raid, dt) {
       }
     }
   }
+}
+
+// ============================================================
+// EXPANSION & REPOPULATION
+// Each settlement with enough armed adults periodically launches an
+// outward "expansion raid" — bypasses the grievance system, just goes
+// at the nearest non-allied settlement within range. Successful raiders
+// resettle in the conquered town, which is the mechanism that actually
+// shifts territory over time.
+// To keep homelands viable, two repopulation forces run: trauma-driven
+// migrants flow into ethnically-aligned havens (instead of leaving the
+// world), and stable peaceful settlements grow new residents slowly.
+// ============================================================
+const EXPANSION_INTERVAL = 45000;       // ms — per-settlement expansion timer
+const EXPANSION_PARTY_MIN = 3;          // need ≥ this many armed to launch
+const EXPANSION_RANGE = 18;             // tiles
+const EXPANSION_DAMAGE_FOR_RESETTLE = 1; // burns or kills required to resettle
+
+const BIRTH_INTERVAL = 60000;           // ms
+const BIRTH_PEACE_WINDOW = 30000;       // settlement must be quiet this long
+const CITY_CARRY_CAPACITY = 32;
+const VILLAGE_CARRY_CAPACITY = 18;
+
+let expansionTickAccumulator = 0;
+function tickExpansion(dt) {
+  if (GAME.ended) return;
+  expansionTickAccumulator += dt;
+  if (expansionTickAccumulator < 1500) return;
+  expansionTickAccumulator = 0;
+
+  for (const s of GAME.settlements) {
+    if (s.destroyed) continue;
+    s.expansionTimer = (s.expansionTimer || 0) - 1500;
+    if (s.expansionTimer > 0) continue;
+    s.expansionTimer = EXPANSION_INTERVAL + Math.random() * 10000;
+    // Don't stack expansion on top of an active raid from this settlement
+    // (let it return first).
+    if ((GAME.raidCooldowns[s.name] || 0) > GAME.ticks) continue;
+    // Find the most-armed local ethnicity.
+    const armedByEth = {};
+    for (const p of W.people) {
+      if (!p.alive || p.fleeing || p.raiding) continue;
+      if (p.place !== s.name || !p.armed) continue;
+      if (p.role === 'child' || p.role === 'priest' || p.role === 'teacher') continue;
+      armedByEth[p.ethnicity] = (armedByEth[p.ethnicity] || 0) + 1;
+    }
+    let bestEth = null, bestN = EXPANSION_PARTY_MIN - 1;
+    for (const [eth, n] of Object.entries(armedByEth)) {
+      if (n > bestN) { bestN = n; bestEth = eth; }
+    }
+    if (!bestEth) continue;
+    // Find target: nearest non-allied (relation ≤ 0.2) settlement where the
+    // raiding ethnicity is NOT already the plurality. (Don't expand into
+    // your own ethnic strongholds.)
+    let best = null, bestD = Infinity;
+    for (const t of GAME.settlements) {
+      if (t === s || t.destroyed) continue;
+      // Skip allied targets.
+      if (t.dominant && relation(bestEth, t.dominant) > 0.2) continue;
+      // Skip targets where raiding ethnicity already dominates.
+      if ((t.composition[bestEth] || 0) >= 0.50) continue;
+      const d = Math.hypot(t.tx - s.tx, t.ty - s.ty);
+      if (d > EXPANSION_RANGE) continue;
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    if (!best) continue;
+    if (spawnRaid(s, best, bestEth, best.dominant || 'yellow', false, true)) {
+      GAME.raidCooldowns[s.name] = GAME.ticks + RAID_COOLDOWN_MS;
+    }
+  }
+}
+
+let birthTickAccumulator = 0;
+function tickBirths(dt) {
+  if (GAME.ended) return;
+  birthTickAccumulator += dt;
+  if (birthTickAccumulator < BIRTH_INTERVAL) return;
+  birthTickAccumulator = 0;
+
+  for (const s of GAME.settlements) {
+    if (s.destroyed) continue;
+    if (!s.dominant) continue;
+    // Only stable settlements grow — recent burns / kills suppress births.
+    if (GAME.ticks - (s.lastConflictAt || 0) < BIRTH_PEACE_WINDOW) continue;
+    const cap = s.isCity ? CITY_CARRY_CAPACITY : VILLAGE_CARRY_CAPACITY;
+    const currentPop = W.people.filter(p =>
+      p.alive && !p.fled && p.place === s.name
+    ).length;
+    if (currentPop >= cap) continue;
+    spawnNewbornAt(s, s.dominant);
+  }
+}
+
+function spawnNewbornAt(settlement, eth) {
+  const pois = W.pois[settlement.name] || [];
+  const homePoi = pois.find(p => p.kind === 'house') ||
+                  pois[Math.floor(Math.random() * pois.length)] ||
+                  { tx: settlement.tx, ty: settlement.ty, kind: 'house' };
+  const tx = homePoi.tx + (Math.random() - 0.5) * 0.4;
+  const ty = homePoi.ty + (Math.random() - 0.5) * 0.4;
+  const screen = tileToScreen(tx, ty);
+  const role = Math.random() < 0.35 ? 'child' :
+               (settlement.isCity
+                 ? ['worker','farmer','merchant','smith','farmer'][Math.floor(Math.random() * 5)]
+                 : ['farmer','farmer','farmer','smith','fisher'][Math.floor(Math.random() * 5)]);
+  const palette = ETHNIC_PALETTE[eth];
+  const traits = generateTraits(role, eth);
+  W.people.push({
+    id: 'person_' + W.people.length,
+    name: pickName(eth),
+    role,
+    ethnicity: eth,
+    place: settlement.name,
+    x: screen.sx, y: screen.sy,
+    tx, ty,
+    home: homePoi,
+    state: 'idle',
+    currentPoi: homePoi,
+    dwellTimer: Math.random() * 600,
+    path: [], pathIdx: 0,
+    facing: 0,
+    seed: Math.random(),
+    shirt: pickShirtForPerson(role, eth),
+    accent: palette.accent,
+    hair: palette.hair[Math.floor(Math.random() * palette.hair.length)],
+    skin: palette.skin,
+    ...traits,
+    alive: true,
+    armed: false,
+    encounterCooldown: 0,
+    bubble: null,
+    stunnedUntil: 0,
+  });
+  // Refresh the people layer so the new sprite shows up.
+  renderPeople();
+}
+
+// Refugees go to the nearest haven of their own ethnicity instead of
+// vanishing off the map. If no such haven exists, they exit (existing
+// behavior).
+function findRefugeeHaven(p, fromS) {
+  let best = null, bestD = Infinity;
+  for (const s of GAME.settlements) {
+    if (s === fromS || s.destroyed) continue;
+    if ((s.composition[p.ethnicity] || 0) < 0.50) continue;
+    const d = Math.hypot(s.tx - p.tx, s.ty - p.ty);
+    if (d < bestD) { bestD = d; best = s; }
+  }
+  return best;
 }
 
 // ============================================================
@@ -3249,8 +3469,20 @@ function tickPeople(dt) {
         p.tx += (Math.random() - 0.5) * 0.04;
         p.ty += (Math.random() - 0.5) * 0.04;
       }
-      // Raiders' next move is dictated by updateRaid() — skip normal POI picking.
-      if (!p.raiding && p.dwellTimer <= 0) {
+      // Raiders' next move is dictated by updateRaid().
+      // Crate-fetchers re-path toward their crate until they pick it up.
+      if (p.fetchingCrate) {
+        const crate = GAME.crates.find(c => c.id === p.fetchingCrate);
+        if (crate) {
+          p.path = buildPathTo(p, { tx: crate.tx, ty: crate.ty });
+          p.pathIdx = 0;
+          p.state = 'moving';
+          p.nextDwell = [100, 200];
+          p.currentPoi = { kind: 'crate', tx: crate.tx, ty: crate.ty };
+        } else {
+          p.fetchingCrate = null;  // crate gone — fall back to normal AI next idle tick
+        }
+      } else if (!p.raiding && p.dwellTimer <= 0) {
         const choice = pickNextPOI(p);
         p.currentPoi = choice.poi;
         p.path = buildPathTo(p, choice.poi);
@@ -3260,15 +3492,35 @@ function tickPeople(dt) {
       }
     } else if (p.state === 'moving') {
       if (p.pathIdx >= p.path.length) {
-        // If fleeing, this is when they exit the world
+        // Fleeing arrives at endpoint:
+        // - With a haven: re-home to that settlement (composition tracking
+        //   then includes them as locals).
+        // - Without: exit the world (existing behavior).
         if (p.fleeing) {
+          if (p.fleeingTo) {
+            const haven = GAME.settlements.find(s => s.name === p.fleeingTo);
+            if (haven && !haven.destroyed) {
+              p.place = haven.name;
+              p.home = (W.pois[haven.name] || []).find(q => q.kind === 'house') ||
+                       { tx: haven.tx, ty: haven.ty, kind: 'house' };
+              p.fleeing = false;
+              p.fleeingTo = null;
+              p.state = 'idle';
+              p.dwellTimer = 200 + Math.random() * 400;
+              continue;
+            }
+          }
           p.fled = true;
-          p.alive = false;       // remove from active simulation
+          p.alive = false;
           p.fledAt = GAME.ticks;
           continue;
         }
         p.state = 'idle';
-        p.dwellTimer = p.nextDwell[0] + Math.random() * (p.nextDwell[1] - p.nextDwell[0]);
+        // Fall back to a sane default if nextDwell wasn't set — happens when
+        // a path was issued by something other than pickNextPOI (crate fetch,
+        // refugee migration, raid system) and the person reached its end.
+        const dwellRange = p.nextDwell || [200, 500];
+        p.dwellTimer = dwellRange[0] + Math.random() * (dwellRange[1] - dwellRange[0]);
         const offX = (Math.random() - 0.5) * 0.4;
         const offY = (Math.random() - 0.5) * 0.4;
         p.tx = p.currentPoi.tx + offX;
@@ -3544,23 +3796,40 @@ svg.addEventListener('wheel', (e) => {
   zoomAtPoint(factor, e.clientX - rect.left, e.clientY - rect.top);
 }, { passive: false });
 
-// Click on empty area closes inspector OR fires airstrike if armed
+// Click on empty area closes inspector, fires airstrike, or drops a crate.
 svg.addEventListener('click', (e) => {
   if (pointerMoved) return;
-  // Airstrike mode: convert click to world tile and fire
+  // Common: convert click to world tile coords.
+  const rect = svg.getBoundingClientRect();
+  const screenX = e.clientX - rect.left;
+  const screenY = e.clientY - rect.top;
+  const worldX = (screenX - camera.tx) / camera.scale;
+  const worldY = (screenY - camera.ty) / camera.scale;
+  const tx = (worldX / (TILE_W/2) + worldY / (TILE_H/2)) / 2;
+  const ty = (worldY / (TILE_H/2) - worldX / (TILE_W/2)) / 2;
+
   if (GAME.airstrikeArmed) {
-    const rect = svg.getBoundingClientRect();
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    // Reverse pan/zoom to get world coords, then unproject from iso to tile coords
-    const worldX = (screenX - camera.tx) / camera.scale;
-    const worldY = (screenY - camera.ty) / camera.scale;
-    // Inverse iso projection: tx = worldX/(W/2) + worldY/(H/2)) / 2; ty = ...
-    // From tileToScreen: sx = (tx - ty) * W/2; sy = (tx + ty) * H/2
-    // Solve: tx = sx/(W/2)/2 + sy/(H/2)/2; ty = sy/(H/2)/2 - sx/(W/2)/2
-    const tx = (worldX / (TILE_W/2) + worldY / (TILE_H/2)) / 2;
-    const ty = (worldY / (TILE_H/2) - worldX / (TILE_W/2)) / 2;
     executeAirstrike(tx, ty);
+    return;
+  }
+  if (GAME.crateArmed) {
+    // Find nearest non-destroyed settlement to the tap.
+    let nearest = null, nearestD = Infinity;
+    for (const s of GAME.settlements) {
+      if (s.destroyed) continue;
+      const d = Math.hypot(s.tx - tx, s.ty - ty);
+      if (d < nearestD) { nearestD = d; nearest = s; }
+    }
+    // Only accept the click if the player tapped reasonably close to a town.
+    if (nearest && nearestD <= (nearest.radius || 3.0) + 2) {
+      if (dropCrate(nearest, true)) {
+        GAME.crateArmed = false;
+        renderCrateButton();
+        updateMapCursor();
+      }
+    } else {
+      addFeed('Tap closer to a town to drop the crate.', 'death-event');
+    }
     return;
   }
   closeInspector();
@@ -3573,11 +3842,14 @@ function loop(t) {
   const dt = animTime ? Math.min(50, t - animTime) : 16;
   animTime = t;
   tickPeople(dt);
+  tickCrates(dt);
   tickRed(dt);
   tickEconomy(dt);
   tickDemographics(dt);
   tickRaids(dt);
+  tickExpansion(dt);
   tickAdvisors(dt);
+  tickBirths(dt);
   tickRelations(dt);
   tickStability(dt);
   if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
@@ -3587,95 +3859,187 @@ function loop(t) {
 }
 
 // ============================================================
-// GUN SHIPPING — the player's main lever
+// WEAPON CRATES — the player's main lever
+// Player drops crates (per-settlement, not per-ethnicity). Unarmed adults
+// in the target settlement walk to the crate; first to arrive get armed.
+// Whoever picks up guns drives `playerGunsShipped` retroactively, which
+// is what the rest of the game (favoredEth, advisor unlock) reads.
 // ============================================================
 const SHIPMENT_COST = 25;
 const GUNS_PER_SHIPMENT = 6;
+const CRATE_RADIUS = 5;          // how far residents will walk to fetch
+const CRATE_LIFETIME = 60000;    // ms — crate disappears after this
 
-function shipGuns(ethnicity) {
-  if (GAME.ended) return;
-  if (GAME.playerMoney < SHIPMENT_COST) {
+function dropCrate(targetSettlement, byPlayer) {
+  if (GAME.ended) return false;
+  const cost = SHIPMENT_COST;
+  if (byPlayer && GAME.playerMoney < cost) {
     addFeed('Insufficient funds for shipment.', 'death-event');
-    return;
+    return false;
   }
-  GAME.playerMoney -= SHIPMENT_COST;
-  GAME.playerGunsShipped[ethnicity] = (GAME.playerGunsShipped[ethnicity] || 0) + GUNS_PER_SHIPMENT;
-  // Update favored faction — whoever the player has armed most
-  let topEth = null, topCount = 0;
-  for (const [e, c] of Object.entries(GAME.playerGunsShipped)) {
-    if (c > topCount) { topCount = c; topEth = e; }
+  if (byPlayer) {
+    GAME.playerMoney -= cost;
+    GAME.playerCratesDropped++;
+  } else {
+    if (GAME.redMoney < cost) return false;
+    GAME.redMoney -= cost;
   }
-  GAME.favoredEth = topEth;
-  // Distribute guns among living adults of that ethnicity
-  distributeGuns(ethnicity, GUNS_PER_SHIPMENT);
-  addFeed(`You ship ${GUNS_PER_SHIPMENT} rifles to the ${ETHNIC_LABELS[ethnicity]} community.`, 'player-event');
-  for (const p of W.people) {
-    if (p.alive && p.ethnicity === ethnicity) {
-      p.ethnicPassion = clamp01(p.ethnicPassion + 0.04);
-    }
+  // Drop just outside the settlement core so the crate is visible (not buried
+  // under a building sprite).
+  const angle = Math.random() * Math.PI * 2;
+  const r = (targetSettlement.isCity ? 1.6 : 1.2);
+  const tx = targetSettlement.tx + Math.cos(angle) * r;
+  const ty = targetSettlement.ty + Math.sin(angle) * r;
+  const crate = {
+    id: 'crate_' + GAME.ticks + '_' + Math.floor(Math.random() * 1000),
+    tx, ty,
+    settlementName: targetSettlement.name,
+    gunsLeft: GUNS_PER_SHIPMENT,
+    droppedAt: GAME.ticks,
+    droppedBy: byPlayer ? 'player' : 'red',
+  };
+  GAME.crates.push(crate);
+  // Tag the GUNS_PER_SHIPMENT nearest unarmed adult locals to fetch.
+  const candidates = W.people.filter(p =>
+    p.alive && !p.armed && !p.fleeing && !p.raiding &&
+    !p.fetchingCrate && p.place === targetSettlement.name &&
+    p.role !== 'child'
+  );
+  candidates.sort((a, b) =>
+    Math.hypot(a.tx - tx, a.ty - ty) - Math.hypot(b.tx - tx, b.ty - ty)
+  );
+  for (const p of candidates.slice(0, GUNS_PER_SHIPMENT)) {
+    p.fetchingCrate = crate.id;
+    // Override their AI to walk to the crate.
+    p.state = 'moving';
+    p.path = buildPathTo(p, { tx, ty });
+    p.pathIdx = 0;
+    p.currentPoi = { kind: 'crate', label: 'weapons', tx, ty };
+    setBubble(p, '⌖', 2500);
+  }
+  if (byPlayer) {
+    addFeed(`You drop a weapons crate near ${targetSettlement.name}.`, 'player-event');
+    redConsiderResponse();
+  } else {
+    addFeed(`Soviet airdrop: weapons crate near ${targetSettlement.name}.`, 'red-event');
   }
   updateHUD();
-  redConsiderResponse();
+  renderCrates();
+  return true;
 }
 
-function distributeGuns(ethnicity, count) {
-  // Pick weighted-random from living adult members of that ethnicity.
-  // Prefer those with higher violence proclivity and ethnic passion.
-  const candidates = W.people.filter(p =>
-    p.alive && !p.armed && p.ethnicity === ethnicity && p.role !== 'child'
-  );
-  if (candidates.length === 0) return;
-  // Score each candidate
-  const scored = candidates.map(p => ({
-    p,
-    score: p.violenceProclivity * 0.5 + p.ethnicPassion * 0.4 + Math.random() * 0.3
-  })).sort((a, b) => b.score - a.score);
-  for (let i = 0; i < Math.min(count, scored.length); i++) {
-    scored[i].p.armed = true;
-    // Receiving a gun raises violence proclivity slightly
-    scored[i].p.violenceProclivity = clamp01(scored[i].p.violenceProclivity + 0.05);
+function tickCrates(dt) {
+  if (GAME.ended) return;
+  // Pickups
+  for (const crate of [...GAME.crates]) {
+    if (crate.gunsLeft <= 0) {
+      removeCrate(crate);
+      continue;
+    }
+    // Anyone marked for THIS crate who's now near it picks up
+    for (const p of W.people) {
+      if (!p.alive || p.fetchingCrate !== crate.id) continue;
+      const d = Math.hypot(p.tx - crate.tx, p.ty - crate.ty);
+      if (d > 0.6) continue;
+      // Pickup.
+      p.armed = true;
+      p.violenceProclivity = clamp01(p.violenceProclivity + 0.05);
+      p.fetchingCrate = null;
+      p.state = 'idle';
+      p.dwellTimer = 200 + Math.random() * 300;
+      crate.gunsLeft--;
+      // Track in playerGunsShipped retroactively so favoredEth + advisor
+      // logic continues to work.
+      const shippedTable = (crate.droppedBy === 'player')
+        ? GAME.playerGunsShipped
+        : GAME.redGunsShipped;
+      shippedTable[p.ethnicity] = (shippedTable[p.ethnicity] || 0) + 1;
+      // Update favored faction = ethnicity that has received the most player
+      // guns so far.
+      let topEth = null, topCount = 0;
+      for (const [e, c] of Object.entries(GAME.playerGunsShipped)) {
+        if (c > topCount) { topCount = c; topEth = e; }
+      }
+      GAME.favoredEth = topEth;
+      if (crate.gunsLeft <= 0) break;
+    }
+    // Lifetime expiration: drop fetcher tags so they go back to normal AI.
+    if (GAME.ticks - crate.droppedAt > CRATE_LIFETIME) {
+      removeCrate(crate);
+    }
   }
 }
 
+function removeCrate(crate) {
+  GAME.crates = GAME.crates.filter(c => c.id !== crate.id);
+  for (const p of W.people) {
+    if (p.fetchingCrate === crate.id) {
+      p.fetchingCrate = null;
+      p.state = 'idle';
+      p.dwellTimer = 100;
+    }
+  }
+  renderCrates();
+}
+
 // ============================================================
-// RED AI — reacts to player's actions
+// RED AI — reacts to player's actions by drop crates of its own
 // ============================================================
 function redConsiderResponse() {
-  // Red waits a bit, then arms a rival faction.
-  // 60% chance per shipment that Red responds within ~3-8 seconds.
-  if (Math.random() < 0.6) {
-    const playerArmed = Object.entries(GAME.playerGunsShipped)
-      .sort((a, b) => b[1] - a[1])[0];
-    if (!playerArmed) return;
-    const playerEth = playerArmed[0];
-    // Pick whichever group is currently most hostile to the player's pick.
-    let target = mostHostileTo(playerEth) || 'maroon';
-    if (target === playerEth) target = 'yellow';
-    // Schedule
-    GAME.redCooldown = 3000 + Math.random() * 5000;
-    GAME.redLastTargetEth = target;
-  }
+  // 60% chance per player crate that Red responds within 3-8s.
+  if (Math.random() >= 0.6) return;
+  // Red picks a settlement where the ethnicity most hostile to the player's
+  // favored has meaningful presence.
+  if (!GAME.favoredEth) return;
+  const target = mostHostileTo(GAME.favoredEth) || 'maroon';
+  const candidates = GAME.settlements.filter(s =>
+    !s.destroyed && (s.composition[target] || 0) >= 0.30
+  );
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => (b.composition[target] || 0) - (a.composition[target] || 0));
+  GAME.redCooldown = 3000 + Math.random() * 5000;
+  GAME.redLastTargetSettlement = candidates[0].name;
 }
 
 function tickRed(dt) {
   if (GAME.ended) return;
-  if (GAME.redCooldown > 0) {
-    GAME.redCooldown -= dt;
-    if (GAME.redCooldown <= 0 && GAME.redLastTargetEth && GAME.redMoney >= SHIPMENT_COST) {
-      // Red ships guns
-      const eth = GAME.redLastTargetEth;
-      GAME.redMoney -= SHIPMENT_COST;
-      GAME.redGunsShipped[eth] = (GAME.redGunsShipped[eth] || 0) + GUNS_PER_SHIPMENT;
-      distributeGuns(eth, GUNS_PER_SHIPMENT);
-      // Inflame their ethnic passion
-      for (const p of W.people) {
-        if (p.alive && p.ethnicity === eth) {
-          p.ethnicPassion = clamp01(p.ethnicPassion + 0.04);
-        }
-      }
-      addFeed(`Reuters reports Soviet weapons reaching ${ETHNIC_LABELS[eth]} factions.`, 'red-event');
-      GAME.redLastTargetEth = null;
-    }
+  if (GAME.redCooldown <= 0) return;
+  GAME.redCooldown -= dt;
+  if (GAME.redCooldown > 0) return;
+  if (!GAME.redLastTargetSettlement || GAME.redMoney < SHIPMENT_COST) {
+    GAME.redLastTargetSettlement = null;
+    return;
+  }
+  const settlement = GAME.settlements.find(s => s.name === GAME.redLastTargetSettlement);
+  GAME.redLastTargetSettlement = null;
+  if (!settlement || settlement.destroyed) return;
+  dropCrate(settlement, false);
+}
+
+// Back-compat shim for headless test harnesses (and possibly future
+// per-ethnicity convenience): drop a crate in the settlement where the
+// given ethnicity has the highest composition.
+function shipGuns(ethnicity) {
+  if (GAME.ended) return;
+  const target = GAME.settlements
+    .filter(s => !s.destroyed && (s.composition[ethnicity] || 0) > 0)
+    .sort((a, b) => (b.composition[ethnicity] || 0) - (a.composition[ethnicity] || 0))[0];
+  if (target) dropCrate(target, true);
+}
+
+// Test helper: directly arm N living adults of a given ethnicity.
+function distributeGuns(ethnicity, count) {
+  const candidates = W.people.filter(p =>
+    p.alive && !p.armed && p.ethnicity === ethnicity && p.role !== 'child'
+  );
+  if (candidates.length === 0) return;
+  const scored = candidates.map(p => ({
+    p,
+    score: p.violenceProclivity * 0.5 + p.ethnicPassion * 0.4 + Math.random() * 0.3,
+  })).sort((a, b) => b.score - a.score);
+  for (let i = 0; i < Math.min(count, scored.length); i++) {
+    scored[i].p.armed = true;
+    scored[i].p.violenceProclivity = clamp01(scored[i].p.violenceProclivity + 0.05);
   }
 }
 
@@ -3713,6 +4077,9 @@ function toggleAirstrikeArmed() {
     GAME.airstrikeArmed = false;
   } else {
     if (GAME.playerMoney < AIRSTRIKE_COST) return;
+    // Don't allow both targeting modes armed at once.
+    GAME.crateArmed = false;
+    renderCrateButton();
     GAME.airstrikeArmed = true;
   }
   renderAirstrikeButton();
@@ -3721,11 +4088,42 @@ function toggleAirstrikeArmed() {
 
 function updateMapCursor() {
   const svg = document.getElementById('worldSvg');
-  if (GAME.airstrikeArmed) {
+  if (GAME.airstrikeArmed || GAME.crateArmed) {
     svg.style.cursor = 'crosshair';
   } else {
     svg.style.cursor = '';
   }
+}
+
+function renderCrateButton() {
+  const btn = document.getElementById('cratebtn');
+  const hint = document.getElementById('cratehint');
+  if (!btn) return;
+  const broke = GAME.playerMoney < SHIPMENT_COST && !GAME.crateArmed;
+  btn.classList.toggle('armed', GAME.crateArmed);
+  btn.disabled = broke;
+  if (GAME.crateArmed) {
+    btn.textContent = 'CANCEL — TAP A TOWN';
+    if (hint) hint.textContent = 'Crate drops to whichever town you tap.';
+  } else {
+    btn.textContent = '⌖ DROP WEAPONS · $' + SHIPMENT_COST;
+    if (hint) hint.textContent = '';
+  }
+}
+
+function toggleCrateArmed() {
+  if (GAME.ended) return;
+  if (GAME.crateArmed) {
+    GAME.crateArmed = false;
+  } else {
+    if (GAME.playerMoney < SHIPMENT_COST) return;
+    // Don't allow both modes armed at once.
+    GAME.airstrikeArmed = false;
+    renderAirstrikeButton();
+    GAME.crateArmed = true;
+  }
+  renderCrateButton();
+  updateMapCursor();
 }
 
 function executeAirstrike(tx, ty) {
@@ -3865,6 +4263,48 @@ function renderBuildings() {
     else drawCity(buildingLayer, f);
   }
 }
+
+function drawCrate(parent, crate) {
+  const { sx, sy } = tileToScreen(crate.tx + 0.5, crate.ty + 0.5);
+  const g = svgEl('g', {
+    transform: `translate(${sx},${sy})`,
+    'data-crate-id': crate.id,
+  });
+  // Shadow
+  g.appendChild(svgEl('ellipse', {
+    cx: 0, cy: 7, rx: 9, ry: 2.2,
+    fill: 'rgba(40,30,15,0.4)',
+  }));
+  // Crate body — wood with iron banding
+  g.appendChild(svgEl('rect', {
+    x: -8, y: -10, width: 16, height: 16,
+    fill: '#a87838',
+    stroke: '#3a2818',
+    'stroke-width': 1.2,
+  }));
+  // Slats
+  g.appendChild(svgEl('line', {
+    x1: -8, y1: -2, x2: 8, y2: -2,
+    stroke: '#3a2818', 'stroke-width': 0.8,
+  }));
+  g.appendChild(svgEl('line', {
+    x1: 0, y1: -10, x2: 0, y2: 6,
+    stroke: '#3a2818', 'stroke-width': 0.8,
+  }));
+  // Stencil mark — single dot on the lid suggests "ammo"
+  g.appendChild(svgEl('circle', {
+    cx: 0, cy: -6, r: 1.4,
+    fill: crate.droppedBy === 'red' ? '#a52a2a' : '#1a3a5a',
+  }));
+  parent.appendChild(g);
+}
+
+function renderCrates() {
+  const layer = document.getElementById('cratesLayer');
+  if (!layer) return;
+  layer.innerHTML = '';
+  for (const crate of GAME.crates) drawCrate(layer, crate);
+}
 // ============================================================
 // FEED & HUD
 // ============================================================
@@ -3887,11 +4327,8 @@ function updateHUD() {
   if (stabEl) stabEl.textContent = stabRound;
   const fill = document.getElementById('hudStabilityFill');
   if (fill) fill.style.width = stabRound + '%';
-  // Disable shipping buttons if broke
-  document.querySelectorAll('.hud-btn').forEach(b => {
-    b.disabled = GAME.playerMoney < SHIPMENT_COST || GAME.ended;
-  });
-  // Re-render airstrike button (state may have changed)
+  // Refresh crate + airstrike buttons (their state may have changed)
+  renderCrateButton();
   renderAirstrikeButton();
 }
 
