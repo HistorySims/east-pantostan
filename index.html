@@ -39,6 +39,18 @@ letter-spacing: 0.15em;
 color: #5a4a35;
 text-transform: uppercase;
 }
+#reportbtn {
+margin-left: 10px;
+background: transparent;
+border: 1px solid #2a1f15;
+color: #2a1f15;
+font-family: monospace;
+font-size: 10px;
+letter-spacing: 0.1em;
+padding: 3px 8px;
+cursor: pointer;
+}
+#reportbtn:hover { background: #f0e2c0; }
 
 #worldArea {
 flex: 1 1 auto;
@@ -447,6 +459,7 @@ cursor: pointer;
   <div id="topbar">
     <span class="turn">East Pantostan</span>
     <span class="info" id="hint">DRAG TO PAN · TAP A PERSON</span>
+    <button id="reportbtn" onclick="exportReport()">▤ REPORT</button>
   </div>
   <div id="worldArea">
     <svg id="worldSvg" preserveAspectRatio="xMidYMid meet">
@@ -1326,6 +1339,8 @@ const GAME = {
   advisorImpacts: 0,    // count of advisor-triggered raid burns + kills; gates airstrikes
   // Active weapon crates dropped on the map
   crates: [],
+  // Narrative event log for the post-game report (timestamped milestones).
+  eventLog: [],
 };
 
 // Threshold at which a settlement is considered "controlled" by an ethnicity.
@@ -1537,6 +1552,15 @@ function killPerson(victim, killer) {
   victim.deathTime = GAME.ticks;
   victim.killedBy = killer ? killer.ethnicity : null;
   GAME.deaths++;
+  // Log milestones — first kill + every 25 thereafter — to keep the
+  // post-game timeline informative without flooding it.
+  if (GAME.deaths === 1) {
+    const place = victim.place;
+    const why = killer ? `${ETHNIC_LABELS[killer.ethnicity]} killed ${ETHNIC_LABELS[victim.ethnicity]}` : 'first death';
+    logEvent('kill:first', `first kill — ${why} at ${place}`);
+  } else if (GAME.deaths % 25 === 0) {
+    logEvent('kill:milestone', `${GAME.deaths} dead`);
+  }
   GAME.recentViolence += 2;
   setBubble(victim, '✕', 4000);
   // Record trauma in the settlement: violence against the victim's ethnicity.
@@ -1682,6 +1706,7 @@ function checkAirstrikeUnlock() {
   if ((GAME.advisorImpacts || 0) < 1) return;
   AIRSTRIKE_AVAILABILITY.unlocked = true;
   addFeed('CABLE FROM HEADQUARTERS: Soviet escalation confirmed. Air assets authorized for use in theater.', 'red-event');
+  logEvent('airstrike:unlock', 'airstrikes authorized');
   renderAirstrikeButton();
 }
 // Every ~2 seconds:
@@ -1966,16 +1991,19 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered, expansion) {
       `Soviet-backed ${ETHNIC_LABELS[ourEth]} fighters mobilize from ${fromS.name} against ${toS.name}.`,
       'red-event'
     );
+    logEvent('raid:advisor', `${ETHNIC_LABELS[ourEth]} (Soviet-backed) raid: ${fromS.name} → ${toS.name}`);
   } else if (expansion) {
     addFeed(
       `${ETHNIC_LABELS[ourEth]} from ${fromS.name} push toward ${toS.name}.`,
       'red-event'
     );
+    logEvent('raid:expansion', `${ETHNIC_LABELS[ourEth]} expansion: ${fromS.name} → ${toS.name}`);
   } else {
     addFeed(
       `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${toS.name}.`,
       'red-event'
     );
+    logEvent('raid:organic', `${ETHNIC_LABELS[ourEth]} raid: ${fromS.name} → ${toS.name}`);
   }
   return true;
 }
@@ -2076,6 +2104,7 @@ function updateRaid(raid, dt) {
         GAME.villagesDestroyed++;
         _territoryVersion++;
         addFeed(`${toS.name} has been razed.`, 'strike-event');
+        logEvent('destroy', `${toS.name} razed by raiders`);
       }
       // Expansion raids: if they did meaningful damage AND the target still
       // stands, surviving raiders RESETTLE there — that's how territory
@@ -2093,6 +2122,7 @@ function updateRaid(raid, dt) {
           setBubble(p, '✓', 2500);
         }
         addFeed(`${ETHNIC_LABELS[raid.ourEth]} fighters settle in ${toS.name}.`, 'red-event');
+        logEvent('resettle', `${party.length} ${ETHNIC_LABELS[raid.ourEth]} resettle in ${toS.name}`);
         GAME.raids = GAME.raids.filter(r => r !== raid);
         return;
       }
@@ -2362,6 +2392,7 @@ function deployAdvisors(redEth) {
   GAME.advisorsDeployed = true;
   GAME.advisorsDeployedAt = GAME.ticks;
   addFeed(`SOVIET MILITARY ADVISORS observed in ${ETHNIC_LABELS[redEth]} territory — ${chosen.map(s => s.name).join(', ')}.`, 'red-event');
+  logEvent('advisor:deploy', `Soviet advisors arrive in ${chosen.map(s => s.name).join(', ')} (${ETHNIC_LABELS[redEth]})`);
   // Fire the first wave of advisor-triggered raids immediately on deploy.
   // Without this, advisors often die before their interval timer ticks down,
   // breaking the airstrike-unlock chain. Advisors are arranging this raid as
@@ -2627,6 +2658,7 @@ function checkEndGame() {
     GAME.winner = survivors[0] || ETHNICITIES.reduce((a,b) =>
       ethnicityPresence[a] >= ethnicityPresence[b] ? a : b
     );
+    logEvent('end', `game ended — winner: ${GAME.winner}`);
     showEndgame();
   }
 }
@@ -3507,6 +3539,7 @@ function tickPeople(dt) {
               p.fleeingTo = null;
               p.state = 'idle';
               p.dwellTimer = 200 + Math.random() * 400;
+              GAME.refugeesCreated++;
               continue;
             }
           }
@@ -3919,9 +3952,11 @@ function dropCrate(targetSettlement, byPlayer) {
   }
   if (byPlayer) {
     addFeed(`You drop a weapons crate near ${targetSettlement.name}.`, 'player-event');
+    logEvent('crate:player', `crate dropped on ${targetSettlement.name}`);
     redConsiderResponse();
   } else {
     addFeed(`Soviet airdrop: weapons crate near ${targetSettlement.name}.`, 'red-event');
+    logEvent('crate:red', `Soviet crate dropped on ${targetSettlement.name}`);
   }
   updateHUD();
   renderCrates();
@@ -4187,6 +4222,7 @@ function executeAirstrike(tx, ty) {
     GAME.deaths++;
   }
   addFeed(`◈ Airstrike called — ${killed} killed.`, 'strike-event');
+  logEvent('airstrike:fire', `airstrike called — ${killed} killed`);
 
   // Survivors near the strike: trauma & flight
   for (const p of W.people) {
@@ -4316,6 +4352,155 @@ function addFeed(text, cls) {
   feed.insertBefore(line, feed.firstChild);
   // Limit feed length
   while (feed.children.length > 30) feed.removeChild(feed.lastChild);
+}
+
+// ============================================================
+// EVENT LOG — narrative timeline for the post-game report.
+// Distinct from the visible feed: only milestone events get logged.
+// ============================================================
+function logEvent(category, message) {
+  GAME.eventLog.push({
+    t: GAME.ticks,
+    category,
+    message,
+  });
+}
+
+function fmtTime(ms) {
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function exportReport() {
+  const lines = [];
+  lines.push('# East Pantostan playthrough report');
+  lines.push('');
+  lines.push(`**Duration:** ${fmtTime(GAME.ticks)} · **Ended:** ${GAME.ended ? 'yes (' + (GAME.winner || 'no winner') + ')' : 'no'}`);
+  lines.push(`**Money:** $${GAME.playerMoney} · **Crates dropped:** ${GAME.playerCratesDropped} · **Airstrikes used:** ${GAME.airstrikesUsed}`);
+  lines.push(`**Player favored ethnicity:** ${GAME.favoredEth || '—'}`);
+  lines.push(`**Stability reading:** ${Math.round(GAME.stability)}`);
+  // Casualty + repopulation tallies
+  const fled = W.people.filter(p => p.fled).length;
+  const migrated = W.people.filter(p => p.alive && p.role !== 'advisor').filter(p => {
+    // approximation: people whose place has changed since spawn aren't trackable
+    // post-hoc, so we rely on the advisor count vs total ratios for sanity. We
+    // don't currently store an "is_migrant" flag — that's fine, the timeline
+    // captures the migration events.
+    return false;
+  }).length;
+  const advisorPeople = W.people.filter(p => p.role === 'advisor').length;
+  const births = W.people.length - 91 - advisorPeople; // approx; init pop ~91 pre-doubling
+  lines.push('');
+  lines.push('## Casualties & churn');
+  lines.push(`- Deaths: ${GAME.deaths}`);
+  lines.push(`- Refugees off-map: ${fled}`);
+  lines.push(`- Advisor sprites: ${advisorPeople}`);
+  lines.push('');
+  // Raid breakdown — counted from event log
+  let raidOrganic = 0, raidExpansion = 0, raidAdvisor = 0;
+  for (const e of GAME.eventLog) {
+    if (e.category === 'raid:organic') raidOrganic++;
+    if (e.category === 'raid:expansion') raidExpansion++;
+    if (e.category === 'raid:advisor') raidAdvisor++;
+  }
+  const burnedTotal = GAME.settlements.reduce((s, x) => s + (x.burnedSlots || []).length, 0);
+  lines.push('## Conflict');
+  lines.push(`- Raids launched: ${GAME.raidsLaunched} (organic ${raidOrganic} · expansion ${raidExpansion} · advisor ${raidAdvisor})`);
+  lines.push(`- Settlements destroyed: ${GAME.villagesDestroyed} / ${GAME.settlements.length}`);
+  lines.push(`- Houses burned (cumulative): ${burnedTotal}`);
+  lines.push(`- Soviet advisors deployed: ${GAME.advisorsDeployed ? 'yes' : 'no'}${GAME.advisorsDeployed ? ' (impacts: ' + GAME.advisorImpacts + ')' : ''}`);
+  lines.push(`- Airstrike authorized: ${AIRSTRIKE_AVAILABILITY.unlocked ? 'yes' : 'no'}`);
+  lines.push('');
+  // Settlement state
+  lines.push('## Settlements (current)');
+  for (const s of GAME.settlements) {
+    const alive = W.people.filter(p => p.alive && p.place === s.name).length;
+    const slotCap = s.isCity ? 7 : 4;
+    const dom = s.dominant || '—';
+    const compStr = Object.entries(s.composition || {})
+      .filter(([_, v]) => v >= 0.10)
+      .sort((a, b) => b[1] - a[1])
+      .map(([e, v]) => `${e} ${Math.round(v * 100)}%`)
+      .join(', ');
+    const flags = [];
+    if (s.destroyed) flags.push('DESTROYED');
+    if (s.hasAdvisors) flags.push('advisors');
+    lines.push(`- **${s.name}** (${s.isCity ? 'city' : 'village'}) — dom: ${dom} · ${alive} alive · burned ${s.burnedSlots.length}/${slotCap} · [${compStr || 'empty'}]${flags.length ? ' · ' + flags.join(', ') : ''}`);
+  }
+  lines.push('');
+  // Final relations
+  lines.push('## Final ethnic relations');
+  const relPairs = [];
+  const seen = new Set();
+  for (const a of ETHNICITIES) {
+    for (const b of ETHNICITIES) {
+      if (a === b) continue;
+      const k = [a, b].sort().join('|');
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const r = relation(a, b);
+      const sign = r > 0 ? '+' : '';
+      relPairs.push(`${a}-${b}: ${sign}${r.toFixed(2)}`);
+    }
+  }
+  lines.push(relPairs.join(' · '));
+  lines.push('');
+  // Timeline
+  lines.push('## Timeline');
+  if (GAME.eventLog.length === 0) {
+    lines.push('_(no events logged)_');
+  } else {
+    for (const e of GAME.eventLog) {
+      lines.push(`- \`${fmtTime(e.t)}\` ${e.message}`);
+    }
+  }
+  const md = lines.join('\n');
+
+  // Try clipboard, fall back to a textarea selection.
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(md).then(() => showReportToast('Report copied'),
+                                           () => fallbackCopy(md));
+  } else {
+    fallbackCopy(md);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.top = '50%';
+  ta.style.left = '50%';
+  ta.style.transform = 'translate(-50%, -50%)';
+  ta.style.zIndex = '9999';
+  ta.style.width = '80vw';
+  ta.style.height = '60vh';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showReportToast('Report copied');
+    document.body.removeChild(ta);
+  } catch (e) {
+    showReportToast('Select all & copy manually');
+    // Leave textarea visible so the user can copy manually
+    setTimeout(() => { try { document.body.removeChild(ta); } catch (e) {} }, 15000);
+  }
+}
+
+function showReportToast(text) {
+  let toast = document.getElementById('reportToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'reportToast';
+    toast.style.cssText = 'position:fixed;top:55px;left:50%;transform:translateX(-50%);background:#2a1f15;color:#f0e2c0;padding:6px 14px;font-family:Palatino,serif;font-size:12px;z-index:200;border:1px solid #f0e2c0;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = text;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 2000);
 }
 
 function updateHUD() {
