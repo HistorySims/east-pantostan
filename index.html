@@ -39,8 +39,11 @@ letter-spacing: 0.15em;
 color: #5a4a35;
 text-transform: uppercase;
 }
-#reportbtn {
-margin-left: 10px;
+#topbar .topbtn,
+#reportbtn,
+#pausebtn,
+#endbtn {
+margin-left: 6px;
 background: transparent;
 border: 1px solid #2a1f15;
 color: #2a1f15;
@@ -50,7 +53,8 @@ letter-spacing: 0.1em;
 padding: 3px 8px;
 cursor: pointer;
 }
-#reportbtn:hover { background: #f0e2c0; }
+#reportbtn:hover, #pausebtn:hover, #endbtn:hover { background: #f0e2c0; }
+#endbtn { color: #7a2018; border-color: #7a2018; }
 
 #worldArea {
 flex: 1 1 auto;
@@ -343,6 +347,83 @@ font-style: italic;
 }
 
 /* Endgame splash — typewritten declassified cable */
+#pauseOverlay {
+position: fixed;
+inset: 0;
+background: rgba(20, 14, 8, 0.78);
+z-index: 80;
+display: flex;
+align-items: center;
+justify-content: center;
+padding: 16px;
+}
+#pauseOverlay.pause-hidden { display: none; }
+.pause-card {
+background: #f0e2c0;
+border: 2px solid #2a1f15;
+padding: 18px 22px;
+max-width: 460px;
+width: 100%;
+max-height: 82vh;
+overflow-y: auto;
+box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+font-family: 'Palatino', 'Book Antiqua', Georgia, serif;
+color: #2a1f15;
+}
+.pause-stamp {
+font-family: monospace;
+font-size: 9px;
+letter-spacing: 0.25em;
+color: #5a4a35;
+text-transform: uppercase;
+border-bottom: 1px solid #2a1f15;
+padding-bottom: 6px;
+margin-bottom: 12px;
+}
+.pause-title {
+font-size: 22px;
+font-style: italic;
+margin-bottom: 12px;
+letter-spacing: 0.04em;
+}
+.pause-body { font-size: 13px; line-height: 1.5; }
+.pause-body p { margin-bottom: 10px; }
+.pause-body strong { font-weight: 700; }
+.relations-grid {
+display: grid;
+grid-template-columns: repeat(6, 1fr);
+gap: 2px;
+margin-top: 10px;
+font-family: monospace;
+font-size: 10px;
+}
+.relations-grid > div {
+padding: 4px 2px;
+text-align: center;
+background: #f4ead6;
+border: 1px solid #c8b89c;
+}
+.relations-grid .head { font-weight: 700; background: #d8c898; color: #2a1f15; }
+.relations-grid .self { background: #5a4a35; color: #f0e2c0; }
+.relations-grid .ally { background: #b8d8a8; }
+.relations-grid .friendly { background: #d8e8c8; }
+.relations-grid .neutral { background: #ece4cc; }
+.relations-grid .hostile { background: #e8c8b8; }
+.relations-grid .enemy { background: #d88878; color: #2a1f15; }
+.pause-resume {
+display: block;
+margin: 16px auto 0;
+background: #2a1f15;
+color: #f0e2c0;
+border: none;
+padding: 8px 22px;
+font-family: 'Palatino', serif;
+font-size: 13px;
+letter-spacing: 0.1em;
+cursor: pointer;
+}
+.pause-resume:hover { background: #4a3525; }
+
 #endgameSplash {
 position: fixed;
 inset: 0;
@@ -459,7 +540,9 @@ cursor: pointer;
   <div id="topbar">
     <span class="turn">East Pantostan</span>
     <span class="info" id="hint">DRAG TO PAN · TAP A PERSON</span>
+    <button id="pausebtn" onclick="togglePause()">⏸ INTEL</button>
     <button id="reportbtn" onclick="exportReport()">▤ REPORT</button>
+    <button id="endbtn" onclick="declareVictory()">⊠ END</button>
   </div>
   <div id="worldArea">
     <svg id="worldSvg" preserveAspectRatio="xMidYMid meet">
@@ -546,6 +629,15 @@ cursor: pointer;
     <span class="cable-attribution">— Tacitus, <em>Agricola</em>, c. 98 AD</span>
   </div>
   <button onclick="location.reload()">A NEW FILE</button>
+</div>
+
+<div id="pauseOverlay" class="pause-hidden">
+  <div class="pause-card">
+    <div class="pause-stamp" id="pauseStamp">CLASSIFIED · OPERATIONS BRIEF</div>
+    <h2 class="pause-title" id="pauseTitle">REVIEW INTEL</h2>
+    <div class="pause-body" id="pauseBody"></div>
+    <button class="pause-resume" onclick="resumeGame()">RESUME</button>
+  </div>
 </div>
 
 <script>
@@ -1341,6 +1433,9 @@ const GAME = {
   crates: [],
   // Narrative event log for the post-game report (timestamped milestones).
   eventLog: [],
+  // Pause state — simulation halts when paused; UI is interactive.
+  paused: false,
+  pauseSeen: { advisor: false, airstrike: false },
 };
 
 // Threshold at which a settlement is considered "controlled" by an ethnicity.
@@ -1640,19 +1735,21 @@ function killPerson(victim, killer) {
 let stabilityTickAccumulator = 0;
 function tickStability(dt) {
   if (GAME.ended) return;
-  // Decay recent violence quickly (it's a pulse counter)
-  GAME.recentViolence = Math.max(0, GAME.recentViolence - dt * 0.001);
+  // Decay recent violence (it's a pulse counter). Faster decay so peace
+  // can register on the meter — previously the meter pinned at 0 and
+  // never recovered even during quiet stretches.
+  GAME.recentViolence = Math.max(0, GAME.recentViolence - dt * 0.003);
 
   stabilityTickAccumulator += dt;
   if (stabilityTickAccumulator < 1500) return;
   stabilityTickAccumulator = 0;
 
-  // Compute a "tension" factor: weighted by how many cross-ethnic adults
-  // are physically close to each other across the country, and how many
-  // are armed. If the population collapses, this naturally crashes to 0.
+  // Tension: cross-ethnic armed adults sharing a settlement create friction.
+  // Weight is intentionally light so that quiet periods (no recent kills)
+  // can lift the meter back up — the satire is that the number rises while
+  // the body count rises too.
   let tensionScore = 0;
   const live = W.people.filter(p => p.alive && !p.fled && p.role !== 'child');
-  // Sample-based — full O(n^2) would be fine at this scale but no need
   for (let i = 0; i < live.length; i++) {
     const a = live[i];
     for (let j = i + 1; j < live.length; j++) {
@@ -1660,11 +1757,11 @@ function tickStability(dt) {
       if (a.place !== b.place) continue;
       if (a.ethnicity === b.ethnicity) continue;
       const armedFactor = (a.armed ? 2 : 1) * (b.armed ? 2 : 1);
-      tensionScore += 0.5 * armedFactor;
+      tensionScore += 0.15 * armedFactor;
     }
   }
-  // Combine with recent violence pulse
-  const target = clamp01((100 - tensionScore - GAME.recentViolence * 8) / 100) * 100;
+  // Combine with recent violence pulse.
+  const target = clamp01((100 - tensionScore - GAME.recentViolence * 6) / 100) * 100;
   // Smooth toward target
   const oldStability = GAME.stability;
   GAME.stability = GAME.stability * 0.6 + target * 0.4;
@@ -1708,6 +1805,11 @@ function checkAirstrikeUnlock() {
   addFeed('CABLE FROM HEADQUARTERS: Soviet escalation confirmed. Air assets authorized for use in theater.', 'red-event');
   logEvent('airstrike:unlock', 'airstrikes authorized');
   renderAirstrikeButton();
+  // First time: auto-pause to brief the player.
+  if (!GAME.pauseSeen.airstrike) {
+    GAME.pauseSeen.airstrike = true;
+    pauseGame('airstrike');
+  }
 }
 // Every ~2 seconds:
 //   1. Trauma to each ethnicity decays slowly (memory fades).
@@ -2393,6 +2495,11 @@ function deployAdvisors(redEth) {
   GAME.advisorsDeployedAt = GAME.ticks;
   addFeed(`SOVIET MILITARY ADVISORS observed in ${ETHNIC_LABELS[redEth]} territory — ${chosen.map(s => s.name).join(', ')}.`, 'red-event');
   logEvent('advisor:deploy', `Soviet advisors arrive in ${chosen.map(s => s.name).join(', ')} (${ETHNIC_LABELS[redEth]})`);
+  // First time: auto-pause to brief the player.
+  if (!GAME.pauseSeen.advisor) {
+    GAME.pauseSeen.advisor = true;
+    pauseGame('advisor');
+  }
   // Fire the first wave of advisor-triggered raids immediately on deploy.
   // Without this, advisors often die before their interval timer ticks down,
   // breaking the airstrike-unlock chain. Advisors are arranging this raid as
@@ -2636,6 +2743,22 @@ function renderEthnicZones() {
   }
 }
 
+function pickWinner() {
+  // Winner = the ethnicity with the largest living-adult population.
+  // Falls back to settlements-controlled if there's a tie.
+  const adultsByEth = {};
+  for (const eth of ETHNICITIES) adultsByEth[eth] = 0;
+  for (const p of W.people) {
+    if (!p.alive || p.fled || p.role === 'child') continue;
+    adultsByEth[p.ethnicity] = (adultsByEth[p.ethnicity] || 0) + 1;
+  }
+  let best = ETHNICITIES[0], bestN = adultsByEth[best];
+  for (const eth of ETHNICITIES) {
+    if (adultsByEth[eth] > bestN) { best = eth; bestN = adultsByEth[eth]; }
+  }
+  return best;
+}
+
 function checkEndGame() {
   if (GAME.ended) return;
   // A faction is "displaced" from a place if fewer than 2 living adults remain
@@ -2650,14 +2773,10 @@ function checkEndGame() {
       if (count >= 2) ethnicityPresence[eth]++;
     }
   }
-  // If only one ethnicity has presence anywhere, they win.
-  // Or if total deaths exceed a threshold, end with whoever is dominant.
   const survivors = ETHNICITIES.filter(eth => ethnicityPresence[eth] > 0);
   if (survivors.length <= 1 || GAME.deaths > 80) {
     GAME.ended = true;
-    GAME.winner = survivors[0] || ETHNICITIES.reduce((a,b) =>
-      ethnicityPresence[a] >= ethnicityPresence[b] ? a : b
-    );
+    GAME.winner = pickWinner();
     logEvent('end', `game ended — winner: ${GAME.winner}`);
     showEndgame();
   }
@@ -3563,7 +3682,7 @@ function tickPeople(dt) {
         const dx = wp.tx - p.tx;
         const dy = wp.ty - p.ty;
         const d = Math.hypot(dx, dy);
-        const speed = (p.fleeing ? 0.0040 : (p.role === 'child' ? 0.0032 : 0.0019)) * dt;
+        const speed = (p.fleeing ? 0.0032 : (p.role === 'child' ? 0.0026 : 0.0015)) * dt;
         if (d < speed * 1.2) {
           p.pathIdx += 1;
         } else {
@@ -3874,19 +3993,21 @@ svg.addEventListener('click', (e) => {
 function loop(t) {
   const dt = animTime ? Math.min(50, t - animTime) : 16;
   animTime = t;
-  tickPeople(dt);
-  tickCrates(dt);
-  tickRed(dt);
-  tickEconomy(dt);
-  tickDemographics(dt);
-  tickRaids(dt);
-  tickExpansion(dt);
-  tickAdvisors(dt);
-  tickBirths(dt);
-  tickRelations(dt);
-  tickStability(dt);
-  if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
-    renderEthnicZones();
+  if (!GAME.paused) {
+    tickPeople(dt);
+    tickCrates(dt);
+    tickRed(dt);
+    tickEconomy(dt);
+    tickDemographics(dt);
+    tickRaids(dt);
+    tickExpansion(dt);
+    tickAdvisors(dt);
+    tickBirths(dt);
+    tickRelations(dt);
+    tickStability(dt);
+    if (GAME.settlements.some(s => GAME.ticks < s.pulseUntil)) {
+      renderEthnicZones();
+    }
   }
   requestAnimationFrame(loop);
 }
@@ -4501,6 +4622,124 @@ function showReportToast(text) {
   toast.textContent = text;
   toast.style.display = 'block';
   setTimeout(() => { toast.style.display = 'none'; }, 2000);
+}
+
+// ============================================================
+// PAUSE / INTEL OVERLAY
+// Used both for player-triggered intel review and for auto-pauses
+// at narrative beats (advisors arrive, airstrike authorized).
+// ============================================================
+function pauseGame(reason) {
+  if (GAME.ended) return;
+  GAME.paused = true;
+  const overlay = document.getElementById('pauseOverlay');
+  const stamp = document.getElementById('pauseStamp');
+  const title = document.getElementById('pauseTitle');
+  const body = document.getElementById('pauseBody');
+  let stampText = 'CLASSIFIED · OPERATIONS BRIEF';
+  let titleText = 'REVIEW INTEL';
+  let bodyHtml = '';
+
+  if (reason === 'advisor') {
+    stampText = 'PRIORITY DISPATCH · 1830 ZULU';
+    titleText = 'SOVIET ADVISORS DEPLOYED';
+    bodyHtml = `
+      <p>Reuters and our own assets confirm <strong>Soviet military advisors</strong> have arrived in the country, embedded with the faction Moscow has been arming.</p>
+      <p>You'll see them as <strong>gray-uniformed sprites</strong> in their host settlements. They are armed and they will <strong>orchestrate raids against your favored faction</strong>, bypassing the usual cycle of grievance.</p>
+      <p>Killing the last advisor in a settlement <strong>lifts the forced-raid pressure</strong> there. Their proxy raids are also what authorize our own escalation.</p>
+      ${renderRelationsHtml()}
+    `;
+  } else if (reason === 'airstrike') {
+    stampText = 'CABLE · EYES ONLY · HQ AUTHORIZATION';
+    titleText = 'AIRSTRIKES AUTHORIZED';
+    bodyHtml = `
+      <p>Soviet escalation is confirmed. Air assets are now at your disposal in theater.</p>
+      <p>An airstrike kills <strong>everyone within a 2.5-tile radius</strong>, scorches the ground permanently, and ruins any building it touches. There is no civilian-versus-combatant distinction.</p>
+      <p>Use them <strong>only when absolutely necessary</strong>. The land does not heal.</p>
+      ${renderRelationsHtml()}
+    `;
+  } else {
+    bodyHtml = renderIntelHtml();
+  }
+
+  if (stamp) stamp.textContent = stampText;
+  if (title) title.textContent = titleText;
+  if (body) body.innerHTML = bodyHtml;
+  if (overlay) overlay.classList.remove('pause-hidden');
+}
+
+function resumeGame() {
+  GAME.paused = false;
+  const overlay = document.getElementById('pauseOverlay');
+  if (overlay) overlay.classList.add('pause-hidden');
+}
+
+function togglePause() {
+  if (GAME.paused) resumeGame();
+  else pauseGame('intel');
+}
+
+function classifyRelation(r) {
+  if (r >= 0.5) return 'ally';
+  if (r >= 0.2) return 'friendly';
+  if (r > -0.2) return 'neutral';
+  if (r > -0.5) return 'hostile';
+  return 'enemy';
+}
+
+function renderRelationsHtml() {
+  const rows = ['<p><strong>Current ethnic relations:</strong></p>', '<div class="relations-grid">'];
+  rows.push('<div class="head"></div>');
+  for (const eth of ETHNICITIES) rows.push(`<div class="head">${eth.slice(0,3)}</div>`);
+  for (const a of ETHNICITIES) {
+    rows.push(`<div class="head">${a.slice(0,3)}</div>`);
+    for (const b of ETHNICITIES) {
+      if (a === b) {
+        rows.push('<div class="self">—</div>');
+      } else {
+        const r = relation(a, b);
+        const cls = classifyRelation(r);
+        const sign = r > 0 ? '+' : '';
+        rows.push(`<div class="${cls}">${sign}${r.toFixed(2)}</div>`);
+      }
+    }
+  }
+  rows.push('</div>');
+  rows.push('<p style="font-size:10px;color:#5a4a35;margin-top:8px;">Green = allied · Red = enemy. Killings push pairs negative; shared enemies pull them positive; everything drifts back to seed values over time.</p>');
+  return rows.join('');
+}
+
+function renderIntelHtml() {
+  const fav = GAME.favoredEth || '—';
+  const advisors = GAME.advisorsDeployed
+    ? `Soviet advisors in ${GAME.settlements.filter(s => s.hasAdvisors).map(s => s.name).join(', ') || '—'}.`
+    : 'No Soviet advisors observed yet.';
+  const airstrike = AIRSTRIKE_AVAILABILITY.unlocked
+    ? 'Airstrikes authorized — use sparingly.'
+    : 'Airstrikes not yet authorized (Soviet escalation must land first).';
+  // Settlement standing
+  const standing = GAME.settlements.filter(s => !s.destroyed).map(s => {
+    const dom = s.dominant ? `<strong>${s.dominant}</strong>` : '<em>contested</em>';
+    return `<div>${s.name} — ${dom}${s.hasAdvisors ? ' · advisors' : ''}</div>`;
+  }).join('');
+  return `
+    <p><strong>Favored faction:</strong> ${fav} · <strong>Stability:</strong> ${Math.round(GAME.stability)} · <strong>Deaths:</strong> ${GAME.deaths}</p>
+    <p>${advisors}</p>
+    <p>${airstrike}</p>
+    ${renderRelationsHtml()}
+    <p style="margin-top:12px;"><strong>Standing settlements:</strong></p>
+    <div style="font-size:11px;line-height:1.6;">${standing || '<em>none</em>'}</div>
+  `;
+}
+
+function declareVictory() {
+  if (GAME.ended) return;
+  if (!confirm('End the mission and file your report? You will not be able to keep playing.')) return;
+  GAME.ended = true;
+  GAME.winner = pickWinner();
+  logEvent('end', `mission ended on player declaration — winner: ${GAME.winner}`);
+  resumeGame();  // make sure overlay is closed
+  showEndgame();
 }
 
 function updateHUD() {
