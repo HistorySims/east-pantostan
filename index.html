@@ -542,7 +542,7 @@ cursor: pointer;
     <span class="info" id="hint">DRAG TO PAN · TAP A PERSON</span>
     <button id="pausebtn" onclick="togglePause()">⏸ INTEL</button>
     <button id="reportbtn" onclick="exportReport()">▤ REPORT</button>
-    <button id="endbtn" onclick="declareVictory()">⊠ END</button>
+    <button id="endbtn" onclick="declareVictory()">⊠ DECLARE VICTORY</button>
   </div>
   <div id="worldArea">
     <svg id="worldSvg" preserveAspectRatio="xMidYMid meet">
@@ -650,6 +650,7 @@ const WORLD_W = 40;   // tiles wide
 const WORLD_H = 30;   // tiles tall
 const TILE_W = 64;    // diamond width in pixels
 const TILE_H = 32;    // diamond height in pixels
+const SPRITE_SCALE = 1.35;  // multiplier on people / houses / ruins / factories / crates
 
 // Terrain types
 const T = {
@@ -708,14 +709,14 @@ const W = {
 // Five groups based on the old faction colors. Each has its own
 // names, clothing palette, and characteristic visual markers.
 // ============================================================
-const ETHNICITIES = ['purple', 'violet', 'indigo', 'maroon', 'yellow'];
+const ETHNICITIES = ['purple', 'orange', 'indigo', 'maroon', 'yellow'];
 
 const ETHNIC_NAMES = {
   purple: {
     first: ['Tessa','Velka','Mirin','Joriel','Karelle','Anya','Lirel','Olya','Brek','Ostrim','Sorra','Pell'],
     last:  ['Cassora','Velsen','Hartmel','Drovann','of the Vale','of the Hills','the Elder','the Younger'],
   },
-  violet: {
+  orange: {
     first: ['Liorah','Yenna','Sira','Halen','Cael','Toska','Senn','Marrow','Bevin','Dorra','Vask','Threnn'],
     last:  ['Lirask','Pellish','Nuvenor','of the Lake','of the West','Threnn','Korva'],
   },
@@ -742,9 +743,9 @@ const ETHNIC_PALETTE = {
     hair: ['#3a2818','#2a1810','#5a3a20'],
     skin: '#e8c098',
   },
-  violet: {
-    shirt: ['#c878d8','#b86ac8','#d088e0','#a85ac0','#e89cee'],
-    accent: '#9a3aaa',
+  orange: {
+    shirt: ['#e8a060','#d88040','#f0b070','#c87038','#e89060'],
+    accent: '#a85020',
     hair: ['#3a2818','#2a1810','#4a2a18'],
     skin: '#e8c098',
   },
@@ -801,16 +802,16 @@ const ADVISOR_RAID_INTERVAL = 25000;       // ms between forced raids per host
 // Ethnic composition of each settlement (must sum to 1.0).
 // "Heartland" settlements are 70-85% one group; mixed towns spread.
 const ETHNIC_COMPOSITION = {
-  Cassora:   { purple: 0.75, violet: 0.10, yellow: 0.08, indigo: 0.04, maroon: 0.03 },
-  Velsen:    { purple: 0.65, violet: 0.22, yellow: 0.08, maroon: 0.03, indigo: 0.02 },
-  Threnholt: { indigo: 0.72, yellow: 0.12, purple: 0.08, maroon: 0.04, violet: 0.04 },
-  Davhal:    { maroon: 0.55, yellow: 0.18, violet: 0.12, purple: 0.08, indigo: 0.07 },
-  Pellish:   { violet: 0.78, purple: 0.12, yellow: 0.06, maroon: 0.02, indigo: 0.02 },
-  Mervin:    { yellow: 0.50, violet: 0.25, maroon: 0.12, purple: 0.08, indigo: 0.05 },
-  Ankesh:    { yellow: 0.32, purple: 0.20, maroon: 0.18, violet: 0.16, indigo: 0.14 },
-  Briska:    { maroon: 0.68, yellow: 0.18, violet: 0.08, purple: 0.04, indigo: 0.02 },
-  Shorvel:   { maroon: 0.78, yellow: 0.10, indigo: 0.06, purple: 0.04, violet: 0.02 },
-  Ovar:      { indigo: 0.68, yellow: 0.18, maroon: 0.06, purple: 0.05, violet: 0.03 },
+  Cassora:   { purple: 0.75, orange: 0.10, yellow: 0.08, indigo: 0.04, maroon: 0.03 },
+  Velsen:    { purple: 0.65, orange: 0.22, yellow: 0.08, maroon: 0.03, indigo: 0.02 },
+  Threnholt: { indigo: 0.72, yellow: 0.12, purple: 0.08, maroon: 0.04, orange: 0.04 },
+  Davhal:    { maroon: 0.55, yellow: 0.18, orange: 0.12, purple: 0.08, indigo: 0.07 },
+  Pellish:   { orange: 0.78, purple: 0.12, yellow: 0.06, maroon: 0.02, indigo: 0.02 },
+  Mervin:    { yellow: 0.50, orange: 0.25, maroon: 0.12, purple: 0.08, indigo: 0.05 },
+  Ankesh:    { yellow: 0.32, purple: 0.20, maroon: 0.18, orange: 0.16, indigo: 0.14 },
+  Briska:    { maroon: 0.68, yellow: 0.18, orange: 0.08, purple: 0.04, indigo: 0.02 },
+  Shorvel:   { maroon: 0.78, yellow: 0.10, indigo: 0.06, purple: 0.04, orange: 0.02 },
+  Ovar:      { indigo: 0.68, yellow: 0.18, maroon: 0.06, purple: 0.05, orange: 0.03 },
 };
 
 function pickEthnicity(placeName) {
@@ -847,7 +848,7 @@ const ROLES = {
 
 const ETHNIC_LABELS = {
   purple: 'Purple',
-  violet: 'Violet',
+  orange: 'Orange',
   indigo: 'Indigo',
   maroon: 'Maroon',
   yellow: 'Yellow',
@@ -954,10 +955,10 @@ function generateWorld() {
       // Trauma: recent violence against each ethnic group in this place.
       // Goes up when a member of that ethnicity is killed here.
       // Decays slowly over time. Drives ethnic flight.
-      trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
+      trauma: { purple: 0, orange: 0, indigo: 0, maroon: 0, yellow: 0 },
       // Grievance[victimEth][perpEth]: identified-perpetrator counter,
       // drives raids when the victim group has armed members nearby.
-      grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
+      grievance: { purple: {}, orange: {}, indigo: {}, maroon: {}, yellow: {} },
       // Slot indices (within drawCity/drawVillage) of houses burned by raiders.
       burnedSlots: [],
       // Soviet advisors present? (set true by deployAdvisors)
@@ -980,8 +981,8 @@ function generateWorld() {
       composition: {},
       pulseUntil: 0,
       destroyed: false,
-      trauma: { purple: 0, violet: 0, indigo: 0, maroon: 0, yellow: 0 },
-      grievance: { purple: {}, violet: {}, indigo: {}, maroon: {}, yellow: {} },
+      trauma: { purple: 0, orange: 0, indigo: 0, maroon: 0, yellow: 0 },
+      grievance: { purple: {}, orange: {}, indigo: {}, maroon: {}, yellow: {} },
       burnedSlots: [],
       hasAdvisors: false,
       advisorRaidTimer: 0,
@@ -1454,16 +1455,16 @@ const AIRSTRIKE_AVAILABILITY = {
 };
 
 // Pairwise ethnic relations, in [-1, +1]. Negative = hostile, positive = allied.
-// Two seeded blocs (purple+indigo, violet+maroon) opposed across the matrix;
+// Two seeded blocs (purple+indigo, orange+maroon) opposed across the matrix;
 // yellow floats with mild distrust of everyone. Live values drift over time
 // from cross-ethnic violence, shared-enemy effects, and a slow regression
 // toward these seed values (so peace eventually returns).
 const RELATIONS_SEED = {
-  purple: { violet: -0.6, indigo: +0.4, maroon: -0.3, yellow: -0.1 },
-  violet: { purple: -0.6, indigo: -0.3, maroon: +0.4, yellow: -0.1 },
-  indigo: { purple: +0.4, violet: -0.3, maroon: -0.6, yellow: -0.1 },
-  maroon: { purple: -0.3, violet: +0.4, indigo: -0.6, yellow: -0.1 },
-  yellow: { purple: -0.1, violet: -0.1, indigo: -0.1, maroon: -0.1 },
+  purple: { orange: -0.6, indigo: +0.4, maroon: -0.3, yellow: -0.1 },
+  orange: { purple: -0.6, indigo: -0.3, maroon: +0.4, yellow: -0.1 },
+  indigo: { purple: +0.4, orange: -0.3, maroon: -0.6, yellow: -0.1 },
+  maroon: { purple: -0.3, orange: +0.4, indigo: -0.6, yellow: -0.1 },
+  yellow: { purple: -0.1, orange: -0.1, indigo: -0.1, maroon: -0.1 },
 };
 const RELATIONS = JSON.parse(JSON.stringify(RELATIONS_SEED));
 
@@ -2054,7 +2055,7 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered, expansion) {
     p.role !== 'child' && p.role !== 'priest' && p.role !== 'teacher' &&
     // Advisors march with the proxy fighters they're directing — both
     // dramatically right and a practical fix for advisor raids failing
-    // when local violet has just barely RAID_PARTY_MIN-1 armed adults.
+    // when local orange has just barely RAID_PARTY_MIN-1 armed adults.
     (advisorTriggered || p.role !== 'advisor')
   );
   const minParty = advisorTriggered ? ADVISOR_RAID_PARTY_MIN : RAID_PARTY_MIN;
@@ -2088,21 +2089,27 @@ function spawnRaid(fromS, toS, ourEth, enemyEth, advisorTriggered, expansion) {
   }
   GAME.raids.push(raid);
   GAME.raidsLaunched++;
+  // Build a phrase like "the maroons" when the target has a dominant
+  // ethnicity, otherwise just name the town. Helps the player track who's
+  // attacking whom in the feed.
+  const enemyLabel = (toS.dominant && toS.dominant !== ourEth)
+    ? `the ${ETHNIC_LABELS[toS.dominant].toLowerCase()}s in ${toS.name}`
+    : toS.name;
   if (advisorTriggered) {
     addFeed(
-      `Soviet-backed ${ETHNIC_LABELS[ourEth]} fighters mobilize from ${fromS.name} against ${toS.name}.`,
+      `Soviet-backed ${ETHNIC_LABELS[ourEth]} soldiers mobilize from ${fromS.name} to attack ${enemyLabel}.`,
       'red-event'
     );
     logEvent('raid:advisor', `${ETHNIC_LABELS[ourEth]} (Soviet-backed) raid: ${fromS.name} → ${toS.name}`);
   } else if (expansion) {
     addFeed(
-      `${ETHNIC_LABELS[ourEth]} from ${fromS.name} push toward ${toS.name}.`,
+      `${ETHNIC_LABELS[ourEth]} fighters gather in ${fromS.name} to attack ${enemyLabel}.`,
       'red-event'
     );
     logEvent('raid:expansion', `${ETHNIC_LABELS[ourEth]} expansion: ${fromS.name} → ${toS.name}`);
   } else {
     addFeed(
-      `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${toS.name}.`,
+      `${ETHNIC_LABELS[ourEth]} raiders set out from ${fromS.name} toward ${enemyLabel}.`,
       'red-event'
     );
     logEvent('raid:organic', `${ETHNIC_LABELS[ourEth]} raid: ${fromS.name} → ${toS.name}`);
@@ -2159,7 +2166,7 @@ function updateRaid(raid, dt) {
       const slotCount = toS.isCity ? 7 : 4;
       raid.burnBudget = Math.max(1, Math.ceil(slotCount * 0.4));
       raid.burnsDone = 0;
-      addFeed(`Raiders reach ${toS.name}.`, 'red-event');
+      addFeed(`${ETHNIC_LABELS[raid.ourEth]} raiders reach ${toS.name}.`, 'red-event');
     } else {
       // Anyone who's gone idle gets re-routed toward the target.
       for (const p of party) {
@@ -2182,7 +2189,7 @@ function updateRaid(raid, dt) {
         if (raid.advisorTriggered) GAME.advisorImpacts++;
         toS.lastConflictAt = GAME.ticks;  // suppress nearby births
         renderBuildings();
-        addFeed(`Raiders torch a building in ${toS.name}.`, 'strike-event');
+        addFeed(`${ETHNIC_LABELS[raid.ourEth]} fighters torch a building in ${toS.name}.`, 'strike-event');
       }
       raid.nextBurnAt = GAME.ticks + 1500 + Math.random() * 1500;
     }
@@ -2205,7 +2212,7 @@ function updateRaid(raid, dt) {
         if (f) f.destroyed = true;
         GAME.villagesDestroyed++;
         _territoryVersion++;
-        addFeed(`${toS.name} has been razed.`, 'strike-event');
+        addFeed(`${toS.name} razed by ${ETHNIC_LABELS[raid.ourEth]} raiders.`, 'strike-event');
         logEvent('destroy', `${toS.name} razed by raiders`);
       }
       // Expansion raids: if they did meaningful damage AND the target still
@@ -2245,7 +2252,7 @@ function updateRaid(raid, dt) {
         p.dwellTimer = 200 + Math.random() * 400;
       }
       GAME.raids = GAME.raids.filter(r => r !== raid);
-      addFeed(`Raiders return to ${fromS.name}.`, 'player-event');
+      addFeed(`${ETHNIC_LABELS[raid.ourEth]} raiders return to ${fromS.name}.`, 'player-event');
     } else {
       for (const p of party) {
         if (p.state === 'idle') sendRaiderTo(p, fromS, 1.5);
@@ -2773,11 +2780,13 @@ function checkEndGame() {
       if (count >= 2) ethnicityPresence[eth]++;
     }
   }
+  // Auto-end ONLY if a single ethnicity has anywhere left — otherwise the
+  // player decides when to declare victory and file their report.
   const survivors = ETHNICITIES.filter(eth => ethnicityPresence[eth] > 0);
-  if (survivors.length <= 1 || GAME.deaths > 80) {
+  if (survivors.length <= 1) {
     GAME.ended = true;
     GAME.winner = pickWinner();
-    logEvent('end', `game ended — winner: ${GAME.winner}`);
+    logEvent('end', `last ethnicity standing — winner: ${GAME.winner}`);
     showEndgame();
   }
 }
@@ -3120,7 +3129,7 @@ function drawCity(parent, c) {
 // Roofless skeleton — what's left after a strike
 function drawRuin(parent, tx, ty, kind) {
   const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
-  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+  const g = svgEl('g', { transform: `translate(${sx},${sy}) scale(${SPRITE_SCALE})` });
   // Scorched ground shadow
   g.appendChild(svgEl('ellipse', {
     cx: 0, cy: 4, rx: kind === 'factory' ? 16 : 12, ry: kind === 'factory' ? 5 : 4,
@@ -3208,7 +3217,7 @@ function drawRuin(parent, tx, ty, kind) {
 
 function drawHouse(parent, tx, ty, kind) {
   const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
-  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+  const g = svgEl('g', { transform: `translate(${sx},${sy}) scale(${SPRITE_SCALE})` });
 
   // Shadow
   g.appendChild(svgEl('ellipse', {
@@ -3272,7 +3281,7 @@ function drawHouse(parent, tx, ty, kind) {
 
 function drawFactory(parent, tx, ty) {
   const { sx, sy } = tileToScreen(tx + 0.5, ty + 0.5);
-  const g = svgEl('g', { transform: `translate(${sx},${sy})` });
+  const g = svgEl('g', { transform: `translate(${sx},${sy}) scale(${SPRITE_SCALE})` });
 
   // Shadow
   g.appendChild(svgEl('ellipse', {
@@ -3340,7 +3349,7 @@ function renderPeople() {
 function drawPerson(parent, p) {
   const screen = tileToScreen(p.tx + 0.5, p.ty + 0.5);
   const g = svgEl('g', {
-    transform: `translate(${screen.sx},${screen.sy})`,
+    transform: `translate(${screen.sx},${screen.sy}) scale(${SPRITE_SCALE})`,
     'data-id': p.id,
     'data-alive': String(p.alive),
     'data-armed': String(p.armed),
@@ -3472,7 +3481,7 @@ function drawPerson(parent, p) {
       stroke: COLOR.ink,
       'stroke-width': 0.35,
     }));
-    if (p.ethnicity === 'violet' && p.seed > 0.5) {
+    if (p.ethnicity === 'orange' && p.seed > 0.5) {
       g.appendChild(svgEl('circle', {
         cx: 1.5, cy: -8.8, r: 0.6,
         fill: p.accent,
@@ -3712,7 +3721,7 @@ function tickPeople(dt) {
     const g = map[p.id];
     if (!g) continue;
     const screen = tileToScreen(p.tx + 0.5, p.ty + 0.5);
-    g.setAttribute('transform', `translate(${screen.sx},${screen.sy})`);
+    g.setAttribute('transform', `translate(${screen.sx},${screen.sy}) scale(${SPRITE_SCALE})`);
     // If alive state changed since last render, update visual
     const wasAlive = g.getAttribute('data-alive') === 'true';
     const wasArmed = g.getAttribute('data-armed') === 'true';
@@ -4424,7 +4433,7 @@ function renderBuildings() {
 function drawCrate(parent, crate) {
   const { sx, sy } = tileToScreen(crate.tx + 0.5, crate.ty + 0.5);
   const g = svgEl('g', {
-    transform: `translate(${sx},${sy})`,
+    transform: `translate(${sx},${sy}) scale(${SPRITE_SCALE})`,
     'data-crate-id': crate.id,
   });
   // Shadow
@@ -4517,7 +4526,7 @@ function exportReport() {
   lines.push('## Casualties & churn');
   lines.push(`- Deaths: ${GAME.deaths}`);
   lines.push(`- Refugees off-map: ${fled}`);
-  lines.push(`- Advisor sprites: ${advisorPeople}`);
+  lines.push(`- Soviet soldiers (alive/dead): ${W.people.filter(p=>p.alive&&p.role==='advisor').length}/${W.people.filter(p=>!p.alive&&p.role==='advisor').length}`);
   lines.push('');
   // Raid breakdown — counted from event log
   let raidOrganic = 0, raidExpansion = 0, raidAdvisor = 0;
@@ -4641,21 +4650,21 @@ function pauseGame(reason) {
   let bodyHtml = '';
 
   if (reason === 'advisor') {
-    stampText = 'PRIORITY DISPATCH · 1830 ZULU';
-    titleText = 'SOVIET ADVISORS DEPLOYED';
+    stampText = 'PRIORITY DISPATCH';
+    titleText = 'SOVIET SOLDIERS HAVE ARRIVED';
     bodyHtml = `
-      <p>Reuters and our own assets confirm <strong>Soviet military advisors</strong> have arrived in the country, embedded with the faction Moscow has been arming.</p>
-      <p>You'll see them as <strong>gray-uniformed sprites</strong> in their host settlements. They are armed and they will <strong>orchestrate raids against your favored faction</strong>, bypassing the usual cycle of grievance.</p>
-      <p>Killing the last advisor in a settlement <strong>lifts the forced-raid pressure</strong> there. Their proxy raids are also what authorize our own escalation.</p>
+      <p><strong>Soviet soldiers</strong> have landed in the country. They've moved into the towns Moscow has been arming.</p>
+      <p>Look for the <strong>gray-uniformed soldiers</strong>. They carry rifles and will lead attacks on your side. Every so often they'll gather a war party and march on one of your towns.</p>
+      <p>If you kill the last Soviet soldier in a town, the attacks from that town stop. Their attacks are also what gives you permission to call airstrikes.</p>
       ${renderRelationsHtml()}
     `;
   } else if (reason === 'airstrike') {
-    stampText = 'CABLE · EYES ONLY · HQ AUTHORIZATION';
+    stampText = 'CABLE FROM HEADQUARTERS';
     titleText = 'AIRSTRIKES AUTHORIZED';
     bodyHtml = `
-      <p>Soviet escalation is confirmed. Air assets are now at your disposal in theater.</p>
-      <p>An airstrike kills <strong>everyone within a 2.5-tile radius</strong>, scorches the ground permanently, and ruins any building it touches. There is no civilian-versus-combatant distinction.</p>
-      <p>Use them <strong>only when absolutely necessary</strong>. The land does not heal.</p>
+      <p>Headquarters has approved airstrikes. You can now call one by tapping the airstrike button and then tapping the map.</p>
+      <p>An airstrike kills <strong>everyone close to where it lands</strong> — civilians too — and scorches the land. Buildings inside the blast are ruined.</p>
+      <p>Try to use them <strong>only when you really need to</strong>. The damage is permanent.</p>
       ${renderRelationsHtml()}
     `;
   } else {
