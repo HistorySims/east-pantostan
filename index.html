@@ -1796,12 +1796,13 @@ function tickStability(dt) {
 // ============================================================
 function checkAirstrikeUnlock() {
   if (AIRSTRIKE_AVAILABILITY.unlocked) return;
-  // Airstrikes authorize only after Soviet escalation is confirmed: their
-  // advisors are deployed AND a Soviet-backed raid has already landed real
-  // damage (≥1 burn or kill). Mirrors the cold-war logic — US airpower
-  // arrives once the proxy war goes hot.
+  // Airstrikes authorize only after Soviet escalation is confirmed AND has
+  // landed real damage. Threshold of 4 impacts (burns + raid-kills) means
+  // the player has watched roughly one full advisor raid play out — they
+  // feel pressured before relief arrives, instead of getting the option
+  // ~5s after advisors deploy.
   if (!GAME.advisorsDeployed) return;
-  if ((GAME.advisorImpacts || 0) < 1) return;
+  if ((GAME.advisorImpacts || 0) < 4) return;
   AIRSTRIKE_AVAILABILITY.unlocked = true;
   addFeed('CABLE FROM HEADQUARTERS: Soviet escalation confirmed. Air assets authorized for use in theater.', 'red-event');
   logEvent('airstrike:unlock', 'airstrikes authorized');
